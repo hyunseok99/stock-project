@@ -1,0 +1,18 @@
+services:
+    producer1:
+      build: .
+      container_name: producer_1
+      env_file:
+        - ./env/producer1_config.env
+      environment:
+        - PYTHONUNBUFFERED=1
+      restart: always
+
+    producer2:
+      build: .
+      container_name: producer_2
+      env_file:
+        - ./env/producer2_config.env
+      environment:
+        - PYTHONUNBUFFERED=1
+      restart: always
