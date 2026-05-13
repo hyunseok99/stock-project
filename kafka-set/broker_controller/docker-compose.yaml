@@ -1,0 +1,47 @@
+services:
+  broker:
+    image: apache/kafka:latest
+    hostname: hs_broker
+    container_name: broker
+    networks:
+      - kafka-set_default
+    ports:
+      - "9092:9092" # !todo must delete after remove external
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      #KAFKA_LISTENERS: INTERNAL://0.0.0.0:9094,CONTROLLER://0.0.0.0:9093 remove external version
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9094,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      #KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker:9094 remove external version
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker:9094,EXTERNAL://shinhan.me:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      #KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT remove external version
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
+      KAFKA_BROKER_SESSION_TIMEOUT_MS: 30000
+      KAFKA_CONTROLLER_QUORUM_FETCH_TIMEOUT_MS: 30000
+      KAFKA_REQUEST_TIMEOUT_MS: 30000
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    command: ["--kafka.server=broker:9094"] # internal broker container
+    ports:
+      - "9308:9308" # for local test connection port
+    networks:
+      - kafka-set_default
+    restart: always
+
+networks:
+  kafka-set_default:
+    external: true

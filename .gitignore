@@ -1,0 +1,20 @@
+# --- 공통 ---
+.env
+*.db
+*.log
+.DS_Store
+
+# --- stock-front (Node/React) ---
+stock-front/node_modules/
+stock-front/dist/
+
+# --- stock-back (Java/Gradle) ---
+stock-back/.gradle/
+stock-back/build/
+stock-back/out/
+
+# --- kafka-set (Python/Docker) ---
+kafka-set/__pycache__/
+kafka-set/venv/
+# 만약 도커 볼륨 데이터를 폴더 내부에 저장한다면 해당 폴더도 제외
+# kafka-set/data/

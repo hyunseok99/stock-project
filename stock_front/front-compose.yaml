@@ -1,0 +1,11 @@
+services:
+  # 프론트엔드 서비스
+  stock-frontend:
+    build: .
+    container_name: stock-front-server
+    networks:
+      - kafka-set_default
+
+networks:
+  kafka-set_default:
+    external: true

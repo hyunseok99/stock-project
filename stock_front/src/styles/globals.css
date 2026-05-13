@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .text-positive {
+    color: #f04452 !important;
+  }
+
+  .text-negative {
+    color: #3182f6 !important;
+  }
+}
