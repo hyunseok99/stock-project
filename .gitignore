@@ -1,0 +1,23 @@
+# --- Frontend & Dashboard (Node/Bun) ---
+**/node_modules/
+**/dist/
+**/.next/
+**/.env
+
+# --- Backend (Spring Boot/Java) ---
+**/build/
+**/target/
+**/.gradle/
+**/*.class
+
+# --- Kafka & DB (Local Data/Logs) ---
+# 로컬에서 테스트한 데이터나 로그 파일은 제외하는 것이 좋습니다.
+**/kafka/data/
+**/kafka/logs/
+**/db/data/
+
+# --- IDE & OS ---
+.idea/
+.vscode/
+*.swp
+Thumbs.db

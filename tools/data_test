@@ -1,0 +1,49 @@
+분석한 프로젝트의 데이터 흐름 및 파일 간 관계를 시니어 시스템 아키텍트 관점에서 설명해 드립니다.
+
+### 1. 데이터 파이프라인 (Data Pipeline)
+
+데이터는 크게 **REST API(정적/이력 데이터)**와 **WebSocket(실시간 데이터)** 두 가지 경로를 통해 흐릅니다.
+
+*   **HTTP/REST Flow (초기화 및 이력):**
+    1.  `axiosInstance.ts`: 공통 설정(BaseURL, Auth Interceptor)이 적용된 Axios 인스턴스 생성.
+    2.  `stockApi.ts`: 서버의 API 엔드포인트(`/api/*`)와 통신하여 종목 목록(`fetchTickers`), 차트 데이터(`fetchStockData`), 관심 종목 등을 가져옴.
+    3.  `StockDashboard.tsx`: 초기 마운트 시 `fetchTickers`를 호출하여 전체 종목 리스트를 확보하고 상태(`stockData`)에 저장.
+
+*   **WebSocket Flow (실시간 업데이트):**
+    1.  `WebSocketContext.tsx`: 애플리케이션 최상단에서 서버(`wss://.../ws`)와 연결을 유지.
+    2.  **데이터 수신:** Kafka 등에서 브로드캐스팅된 실시간 주가 데이터(`StockPriceUpdate`)를 수신하여 `lastMessage` 상태를 갱신.
+    3.  **데이터 소비:** `useWebSocket` 훅을 구독 중인 `StockDashboard`와 `StockChart`가 변경된 메시지를 즉시 감지.
+    4.  **UI 반영:** `StockDashboard`는 리스트의 가격과 등락률을 업데이트하고 애니메이션을 트리거하며, `StockChart`는 현재 캔들(Bar)의 고가/저가/종가를 실시간으로 갱신합니다.
+
+---
+
+### 2. 실행 및 처리 순서 보장 메커니즘
+
+시스템은 React의 생명주기와 전역 상태 관리(Context API)를 통해 순서를 제어합니다.
+
+1.  **Provider 계층 구조 (`main.tsx`):**
+    *   `ThemeProvider` -> `CssBaseline` -> `WebSocketProvider` -> `App` 순으로 래핑되어, 하위 모든 컴포넌트가 스타일과 실시간 데이터 스트림에 접근할 수 있는 환경을 먼저 조성합니다.
+2.  **Dashboard 초기화 로직 (`StockDashboard.tsx`):**
+    *   `useEffect` 내의 `init()` 비동기 함수가 가장 먼저 실행되어 종목 마스터 데이터를 가져옵니다.
+    *   데이터 로드가 완료된 후에만 첫 번째 종목을 `selectedStock`으로 설정하여 차트와 리포트가 올바른 초기값을 가지도록 보장합니다.
+3.  **차트 동기화 및 캐싱 (`StockChart.tsx`):**
+    *   `globalDataCache` (Map)를 사용하여 종목 변경 시에도 기존에 로드된 데이터를 즉시 보여주며 성능을 최적화합니다.
+    *   `useEffect`의 의존성 배열(`ticker`, `type`)을 통해 종목이나 차트 주기(일/주/월/년)가 변경될 때마다 순차적으로 차트 인스턴스를 재생성하고 데이터를 다시 로드합니다.
+
+---
+
+### 3. 파일별 핵심 역할 요약
+
+| 구분 | 파일명 | 핵심 역할 |
+| :--- | :--- | :--- |
+| **설정** | `package.json` | React 19, MUI, Tailwind, Lightweight Charts 등 기술 스택 정의 |
+| | `gemini.md` | 프로젝트 코딩 표준 및 아키텍처 가이드라인 (MUI+Tailwind 조합 등) |
+| **인프라** | `axiosInstance.ts` | API 통신을 위한 네트워크 계층 설정 및 보안(JWT) 처리 |
+| | `WebSocketContext.tsx` | 전역 실시간 데이터 스트림 관리 및 브로드캐스팅 센터 |
+| **서비스** | `stockApi.ts` | 백엔드 비즈니스 엔드포인트와 통신하는 추상화된 데이터 접근 계층 |
+| | `types/stock.ts` | `Stock`, `KafkaData` 등 시스템 전반의 타입 안정성 보장 |
+| **UI 컴포넌트** | `StockDashboard.tsx` | **메인 오케스트레이터**. 전체 데이터 상태 관리 및 실시간 리스트 업데이트 제어 |
+| | `StockChart.tsx` | **시각화 엔진**. 이력 데이터 페이징(무한 스크롤) 및 실시간 캔들 병합 로직 처리 |
+| | `StockPriceList.tsx` | 실시간 주가 변동을 시각적으로 보여주는 데이터 그리드 |
+
+이 구조는 **단방향 데이터 흐름**과 **관심사 분리(SoC)**를 충실히 따르고 있으며, 특히 실시간 데이터와 정적 데이터를 효율적으로 병합하여 사용자에게 끊김 없는 대시보드 경험을 제공하도록 설계되어 있습니다.

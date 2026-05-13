@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name: "kafka-monitoring"
+    scheme: https # HTTPS 사용
+    static_configs:
+      - targets: ["shinhan.me"] # 포트를 생략하면 기본 443
+    # 만약 자가서명 인증서 에러가 난다면 아래 주석 해제
+    # tls_config:
+    #   insecure_skip_verify: true
