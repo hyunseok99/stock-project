@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="Gradle: org.springframework.boot:spring-boot-devtools:3.4.3" type="java-imported" external-system-id="GRADLE">
+    <properties groupId="org.springframework.boot" artifactId="spring-boot-devtools" version="3.4.3" baseVersion="3.4.3" />
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/../../shinhanDS/mini/stock_back/.gradle/8.11.1/caches/modules-2/files-2.1/org.springframework.boot/spring-boot-devtools/3.4.3/2ff7eda01cc1f445ddf1cc4a18fc4950634dbb33/spring-boot-devtools-3.4.3.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

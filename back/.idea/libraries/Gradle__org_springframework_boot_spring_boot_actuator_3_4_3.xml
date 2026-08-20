@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="Gradle: org.springframework.boot:spring-boot-actuator:3.4.3" type="java-imported" external-system-id="GRADLE">
+    <properties groupId="org.springframework.boot" artifactId="spring-boot-actuator" version="3.4.3" baseVersion="3.4.3" />
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/../../shinhanDS/mini/stock_back/.gradle/8.11.1/caches/modules-2/files-2.1/org.springframework.boot/spring-boot-actuator/3.4.3/64bd1325ed7d0d46141c161a1dd22ad818f3ea27/spring-boot-actuator-3.4.3.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

@@ -1,0 +1,12 @@
+services:
+  java-backend:
+    build: .
+    container_name: stock-backend-server
+    volumes:
+      - /home/ubuntu/sqlite-db/db/:/app/data:ro #read only
+    networks:
+      - kafka-set_default
+    restart: always
+networks:
+  kafka-set_default:
+    external: true

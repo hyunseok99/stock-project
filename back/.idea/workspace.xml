@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="4c854a6e-80fd-4b4f-8c41-a03aeeac1456" name="Changes" comment="" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ExternalProjectsData">
+    <projectState path="$PROJECT_DIR$">
+      <ProjectState />
+    </projectState>
+  </component>
+  <component name="ExternalProjectsManager">
+    <system id="GRADLE">
+      <state>
+        <projects_view>
+          <tree_state>
+            <expand>
+              <path>
+                <item name="" type="6a2764b6:ExternalProjectsStructure$RootNode" />
+                <item name="stock_server" type="f1a62948:ProjectNode" />
+              </path>
+            </expand>
+            <select />
+          </tree_state>
+        </projects_view>
+      </state>
+    </system>
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Enum" />
+        <option value="Interface" />
+        <option value="Class" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$/.." value="release" />
+      </map>
+    </option>
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;hyunseok99&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/hyunseok99/stock-project&quot;,
+    &quot;accountId&quot;: &quot;9db27462-8e52-4ad3-be3c-bf85e836aa82&quot;
+  }
+}</component>
+  <component name="KubernetesApiPersistence">{}</component>
+  <component name="KubernetesApiProvider">{
+  &quot;isMigrated&quot;: true
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 0
+}</component>
+  <component name="ProjectId" id="3ANbGCWoaj0f7HLM1ScTo6oiUdM" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Downloaded.Files.Path.Enabled": "false",
+    "Gradle.Build back.executor": "Run",
+    "Repository.Attach.Annotations": "false",
+    "Repository.Attach.JavaDocs": "false",
+    "Repository.Attach.Sources": "false",
+    "RequestMappingsPanelOrder0": "0",
+    "RequestMappingsPanelOrder1": "1",
+    "RequestMappingsPanelWidth0": "75",
+    "RequestMappingsPanelWidth1": "75",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "Spring Boot.SolServerApplication.executor": "Run",
+    "git-widget-placeholder": "main",
+    "ignore.virus.scanning.warn.message": "true",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "D:/Stock_oracle_instance/back",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "web.server",
+    "ts.external.directory.path": "D:\\IntelliJ IDEA 2024.3\\plugins\\javascript-plugin\\jsLanguageServicesImpl\\external",
+    "vue.rearranger.settings.migration": "true"
+  },
+  "keyToStringList": {
+    "DatabaseDriversLRU": [
+      "sqlite"
+    ]
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyClassDialog.RECENTS_KEY">
+      <recent name="org.team4.sol_server.domain.balance" />
+      <recent name="org.team4.sol_server.domain.order" />
+    </key>
+  </component>
+  <component name="RunManager">
+    <configuration default="true" type="JetRunConfigurationType">
+      <module name="back" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration default="true" type="KotlinStandaloneScriptRunConfigurationType">
+      <module name="back" />
+      <option name="filePath" />
+      <method v="2" />
+    </configuration>
+    <configuration name="SolServerApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" nameIsGenerated="true">
+      <option name="FRAME_DEACTIVATION_UPDATE_POLICY" value="UpdateClassesAndResources" />
+      <module name="stock_server.main" />
+      <option name="SPRING_BOOT_MAIN_CLASS" value="org.team4.sol_server.SolServerApplication" />
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-jdk-9823dce3aa75-fdfe4dae3a2d-intellij.indexing.shared.core-IU-243.21565.193" />
+        <option value="bundled-js-predefined-d6986cc7102b-e768b9ed790e-JavaScript-IU-243.21565.193" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="4c854a6e-80fd-4b4f-8c41-a03aeeac1456" name="Changes" comment="" />
+      <created>1772435877431</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1772435877431</updated>
+      <workItem from="1772435878773" duration="5741000" />
+      <workItem from="1772514105163" duration="3138000" />
+      <workItem from="1772524719019" duration="5042000" />
+      <workItem from="1772598806719" duration="18381000" />
+      <workItem from="1772683376417" duration="2881000" />
+      <workItem from="1772687435319" duration="8001000" />
+      <workItem from="1773043306276" duration="539000" />
+      <workItem from="1773119456149" duration="554000" />
+      <workItem from="1773193702745" duration="9038000" />
+      <workItem from="1773477648662" duration="20000" />
+      <workItem from="1779781773595" duration="1186000" />
+      <workItem from="1779783545546" duration="317000" />
+      <workItem from="1779788883339" duration="1204000" />
+      <workItem from="1779858381951" duration="4442000" />
+      <workItem from="1779954727212" duration="401000" />
+      <workItem from="1780204153246" duration="1796000" />
+      <workItem from="1782457355736" duration="484000" />
+      <workItem from="1783591170102" duration="2315000" />
+      <workItem from="1783754902648" duration="15285000" />
+      <workItem from="1783922008890" duration="5508000" />
+      <workItem from="1784106343945" duration="1727000" />
+      <workItem from="1784187733750" duration="5952000" />
+      <workItem from="1784194576338" duration="909000" />
+      <workItem from="1784366553909" duration="698000" />
+      <workItem from="1784619986760" duration="7016000" />
+      <workItem from="1784796626424" duration="38000" />
+      <workItem from="1784978228407" duration="722000" />
+      <workItem from="1785054041584" duration="669000" />
+      <workItem from="1785055508612" duration="2452000" />
+      <workItem from="1785148065707" duration="501000" />
+      <workItem from="1785213446490" duration="5504000" />
+      <workItem from="1785403917491" duration="13213000" />
+      <workItem from="1785736520577" duration="935000" />
+      <workItem from="1786187027397" duration="735000" />
+      <workItem from="1786188703090" duration="307000" />
+      <workItem from="1786503832881" duration="3452000" />
+      <workItem from="1787215382516" duration="3998000" />
+      <workItem from="1787220192750" duration="84000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
