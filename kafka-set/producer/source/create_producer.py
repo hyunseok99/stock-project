@@ -7,5 +7,6 @@ def get_producer():
     return KafkaProducer(
         bootstrap_servers=broker,
         client_id='stock-producer',
+        api_version=(3,0,0),
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )

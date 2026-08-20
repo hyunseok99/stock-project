@@ -137,7 +137,7 @@ async def connect(producer):
                 tr_type = '1'
 
                 # 여러 종목을 순차적으로 구독
-                senddata_list = []
+                ## senddata_list = []
                 for stockcode in kospi_tickers:
                     senddata = json.dumps({
                         "header": {
@@ -153,11 +153,12 @@ async def connect(producer):
                             }
                         }
                     })
-                    senddata_list.append(senddata)
+                    ## senddata_list.append(senddata)
                     print('Input Command is :', senddata)
-
-                for senddata in senddata_list:
                     await websocket.send(senddata)
+                    await asyncio.sleep(0.2)
+                ## for senddata in senddata_list:
+                    ## await websocket.send(senddata)
 
                 # # 나스닥용
                 # print("nasdap_stocks: ",nasdaq)
@@ -194,7 +195,6 @@ async def connect(producer):
                                 # print("#### 주식체결 ####")
                                 #data_cnt = int(recvstr[2])  # 체결데이터 개수
                                 stockspurchase(producer, recvstr[3], today_date)
-                                await asyncio.sleep(0.2)
                     else:
                         jsonObject = json.loads(data)
                         trid = jsonObject["header"]["tr_id"]

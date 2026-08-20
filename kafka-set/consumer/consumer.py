@@ -1,8 +1,10 @@
 import os
+import time
 import asyncio
 import websockets
 import json
 from kafka import KafkaConsumer
+from kafka.errors import NoBrokersAvailable
 
 # 환경 변수
 broker = os.getenv('KAFKA_BROKER')
@@ -16,23 +18,39 @@ connected_clients = set() # 접속중인 웹소켓  클라이언트 저장
 
 # Kafka Consumer 설정
 def create_consumers():
-    consumer1 = KafkaConsumer(
-        kafka_topic,
-        bootstrap_servers=broker,
-        auto_offset_reset='latest',
-        group_id='consumer-group',
-        enable_auto_commit=True,
-        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-    )
-    consumer2 = KafkaConsumer(
-        kafka_topic_second,
-        bootstrap_servers=broker,
-        auto_offset_reset='latest',
-        group_id='consumer-group2',
-        enable_auto_commit=True,
-        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-    )
-    return consumer1, consumer2
+    while True:
+        try:
+            print(f"Connecting to Kafka broker at {broker}...")
+            
+            consumer1 = KafkaConsumer(
+                kafka_topic,
+                bootstrap_servers=broker,
+                auto_offset_reset='latest',
+                group_id='consumer-group',
+                enable_auto_commit=True,
+                api_version=(3,0,0),
+                value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+            )
+            
+            consumer2 = KafkaConsumer(
+                kafka_topic_second,
+                bootstrap_servers=broker,
+                auto_offset_reset='latest',
+                group_id='consumer-group2',
+                enable_auto_commit=True,
+                api_version=(3,0,0),
+                value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+            )
+            
+            print("Successfully connected to Kafka broker")
+            return consumer1, consumer2
+            
+        except NoBrokersAvailable:
+            print(f"Kafka broker ({broker}) is not available yet. Retrying in 3 seconds...")
+            time.sleep(3)
+        except Exception as e:
+            print(f"Unexpected error while connecting to Kafka: {e}. Retrying in 3 seconds...")
+            time.sleep(3)
 
 # Kafka 메시지 소비를 비동기로 처리하는 함수
 # Kafka 메시지를 모든 클라이언트에 제공해주는 함수 
