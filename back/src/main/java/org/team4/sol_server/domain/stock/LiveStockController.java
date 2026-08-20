@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.team4.sol_server.error.CustomException;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -15,7 +16,6 @@ import java.util.List;
 @RequiredArgsConstructor
 @Log4j2
 public class LiveStockController {
-
     private final LiveStockService liveStockService;
     // type에 맞는 데이터 List를 반환
     @GetMapping("/inform")
@@ -31,9 +31,9 @@ public class LiveStockController {
             return ResponseEntity.ok(liveStockService.getMonthlyStockData(ticker, page));
         } else if ("yearly".equals(type)) {
             return ResponseEntity.ok(liveStockService.getYearlyStockData(ticker, page));
-        } else {
-            return ResponseEntity.badRequest().body(Collections.singletonList("Invalid type"));
         }
+
+        throw new CustomException(LiveStockErrorCode.INVALID_STOCK_TYPE);
     }
 
     @GetMapping("/tickers")

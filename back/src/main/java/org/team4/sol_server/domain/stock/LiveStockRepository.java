@@ -29,7 +29,8 @@ public interface LiveStockRepository extends JpaRepository<LiveStock, Long> {
 
     LiveStock findFirstByTickerOrderByDateDesc(String ticker);
 
+    // 티커별 최신 데이터 조회 (ticker, date) index 이용
     @Query("SELECT s FROM LiveStock s " +
-       "WHERE s.id IN (SELECT MAX(s2.id) FROM LiveStock s2 GROUP BY s2.ticker)")
+       "WHERE (s.ticker, s.date) IN (SELECT s2.ticker, MAX(s2.date) FROM LiveStock s2 GROUP BY s2.ticker)")
     List<LiveStock> findAllLatestStocks();
 }

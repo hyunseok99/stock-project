@@ -2,8 +2,9 @@ package org.team4.sol_server.domain.stock;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.team4.sol_server.domain.stock.dto.*;
 
@@ -28,6 +29,7 @@ public class LiveStockService {
 
 
     // 초기화를 위한 가장 최신의 데이터를 티커별로 반환
+    @Cacheable(value = "initStockDataCache", cacheManager = "localCacheManager")
     public List<DefaultStockDTO> getInitStockData() {
         List<LiveStock> liveStocks = liveStockRepository.findAllLatestStocks();
         List<DefaultStockDTO> defaultData = liveStocks.stream()
@@ -46,6 +48,13 @@ public class LiveStockService {
             .collect(Collectors.toList());
 
         return defaultData;
+    }
+
+    // 캐싱 (어제까지의 데이터)
+    @Scheduled(cron = "0 0 8 * * *", zone = "Asia/Seoul") // 매일 차임 8시에
+    @CacheEvict(value = "initStockDataCache", allEntries = true, cacheManager = "localCacheManager")
+    public void clearStockDataCache() {
+        System.out.println("장 시작 전: 주식 초기 데이터 캐시 초기화 완료!");
     }
 
     public List<DailyStockDTO> getDailyStockData(String ticker, int page) {

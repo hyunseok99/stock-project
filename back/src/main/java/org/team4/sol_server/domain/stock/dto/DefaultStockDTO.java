@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class DefaultStockDTO {
+public class DefaultStockDTO{
     private String ticker;
     private String tickerName;
     private int startPrice;

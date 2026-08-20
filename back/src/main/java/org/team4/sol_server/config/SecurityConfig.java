@@ -36,7 +36,7 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource())) //CORS 설정을 SecurityFilterChain 내에서 적용
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/", "/login", "/oauth2/**", "/oauth2/user", "/login/kakao").permitAll()
-                        .requestMatchers("/auth/**","/api/**").permitAll()
+                        .requestMatchers("/auth/**","/api/**", "/actuator/prometheus", "/error").permitAll()
                         .anyRequest().authenticated()
                 )
 //                .addFilterBefore(new JwtAuthenticateFilter(jwtTokenProvider), UsernamePasswordAuthenticationFilter.class) //JWT 필터 추가
@@ -67,7 +67,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(List.of(
                 "https://shinhan.me",          // 1. 브라우저 접속용 (필수)
                 "http://shinhan.me",           // 2. HTTP 접속 대응
-                "http://java-backend:8090"    // 5. 컨테이너 간 내부 통신용 (stock_consumer 등)
+                "http://java-backend:8090"    // 3. 컨테이너 간 내부 통신용 (stock_consumer 등)
         ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE","PATCH", "OPTIONS")); //OPTIONS 추가
         configuration.setAllowCredentials(true); //쿠키 허용
