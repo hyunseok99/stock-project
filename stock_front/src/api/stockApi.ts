@@ -1,5 +1,10 @@
 import axiosInstance from "./axiosInstance";
-import type { Stock } from "../types/stock";
+import type {
+  DepositRequest,
+  OrderRequest,
+  Stock,
+  UserInitRequest,
+} from "../types/stock";
 
 export interface StockDataResponse {
   date: string;
@@ -115,4 +120,37 @@ export const removeFromWatchlist = async (ticker: string): Promise<void> => {
   } catch (error) {
     throw error;
   }
+};
+
+/**
+ * Initializes a guest user (creates user + seeds initial Redis balance).
+ * @param userId - The guest user id.
+ * @returns Promise that resolves on success.
+ */
+export const initUser = async (userId: string): Promise<void> => {
+  const payload: UserInitRequest = { userId };
+  await axiosInstance.post("/api/users/init", payload);
+};
+
+/**
+ * Requests a deposit into the user's balance.
+ * @param userId - The user id.
+ * @param amount - The amount to deposit (won).
+ * @returns Promise that resolves on success.
+ */
+export const depositBalance = async (
+  userId: string,
+  amount: number,
+): Promise<void> => {
+  const payload: DepositRequest = { userId, amount };
+  await axiosInstance.post("/api/balance/deposit", payload);
+};
+
+/**
+ * Requests a stock order (buy/sell).
+ * @param order - The order request payload.
+ * @returns Promise that resolves on success.
+ */
+export const createOrder = async (order: OrderRequest): Promise<void> => {
+  await axiosInstance.post("/api/orders", order);
 };

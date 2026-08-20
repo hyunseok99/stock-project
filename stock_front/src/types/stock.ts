@@ -30,4 +30,40 @@ export interface StockPriceUpdate {
   highPrice?: number;
 }
 
-export type KafkaData = MarketStatusUpdate | StockPriceUpdate;
+export type KafkaData =
+  | MarketStatusUpdate
+  | StockPriceUpdate
+  | StockPriceUpdate[];
+
+export interface WrappedMessage {
+  payload: KafkaData;
+  timestamp: number;
+}
+
+// --- [추가] 입금 / 주문 / SSE 알림 관련 타입 ---
+
+export interface UserInitRequest {
+  userId: string;
+}
+
+export interface DepositRequest {
+  userId: string;
+  amount: number;
+}
+
+export interface OrderRequest {
+  userId: string;
+  ticker: string;
+  orderType: "BUY" | "SELL";
+  price: number;
+  quantity: number;
+}
+
+export interface OrderNotification {
+  userId: string;
+  ticker: string;
+  orderType?: string;
+  status: string; // "SUCCESS" | "FAILED" ...
+  message: string;
+  processedPartition?: number | null;
+}

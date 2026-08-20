@@ -12,8 +12,7 @@ import type {
   HistogramData,
   Time,
 } from "lightweight-charts";
-import { useWebSocket } from "../../contexts/WebSocketContext";
-import type { Stock, StockPriceUpdate } from "../../types/stock";
+import type { Stock } from "../../types/stock";
 import { fetchStockData } from "../../api/stockApi";
 import ChartTypeButton from "./ChartTypeButton";
 import type { ChartType } from "./ChartTypeButton";
@@ -190,7 +189,6 @@ const StockChart: React.FC<StockChartProps> = ({
   ticker,
   currentPriceInfo,
 }) => {
-  const { lastMessage } = useWebSocket();
   const [, setCandlestickData] = useState<ExtendedCandlestickData[]>([]);
   const [, setHistogramData] = useState<ExtendedHistogramData[]>([]);
   const [type, setType] = useState<ChartType>("daily");
@@ -203,8 +201,6 @@ const StockChart: React.FC<StockChartProps> = ({
   const pageRef = useRef(1);
   const isInitialLoad = useRef(true); // 초기 마운트 시 setData([]) 호출 방지를 위해 true로 시작
   const hasMoreRef = useRef(true);
-
-
 
   // Keep a ref to currentPriceInfo to use in useEffect without adding it to dependencies (avoiding re-init)
   const currentPriceInfoRef = useRef(currentPriceInfo);
@@ -383,7 +379,7 @@ const StockChart: React.FC<StockChartProps> = ({
                 };
               })
               .filter((v): v is ExtendedHistogramData => v !== null);
-            
+
             // 기존 실시간 데이터와 병합
             const current = tickerCache.get(chartType) || {
               candlestickData: [],
@@ -406,9 +402,11 @@ const StockChart: React.FC<StockChartProps> = ({
               const cachedItem = currentCandleMap.get(timeKey);
               if (cachedItem) {
                 currentCandleMap.delete(timeKey);
-                // 우선순위: 실시간 캐시(price/close) 
-                const cachedClose = Number((cachedItem as any).price || cachedItem.close || 0);
-                
+                // 우선순위: 실시간 캐시(price/close)
+                const cachedClose = Number(
+                  (cachedItem as any).price || cachedItem.close || 0,
+                );
+
                 return {
                   ...apiItem,
                   high: Math.max(apiItem.high, cachedItem.high),
@@ -466,131 +464,6 @@ const StockChart: React.FC<StockChartProps> = ({
     [ticker],
   );
 
-  // WebSocket을 통한 실시간 데이터 처리 로직
-  useEffect(() => {
-    if (!lastMessage || lastMessage.ticker !== ticker) return;
-    
-    const kafkaData = lastMessage as StockPriceUpdate;
-      
-    const rawTime = normalizeDate(
-      (kafkaData as any).date || new Date().toISOString(),
-    );
-    if (!rawTime) return;
-    const kafkaTime = rawTime as string;
-
-    const chartTypes: ChartType[] = ["daily", "weekly", "monthly", "yearly"];
-    const tickerCache =
-      globalDataCache.get(ticker) || new Map<ChartType, CacheEntry>();
-
-    if (!globalDataCache.has(ticker)) globalDataCache.set(ticker, tickerCache);
-
-    chartTypes.forEach((t) => {
-      const targetTime = getAlignedTime(kafkaTime, t);
-      if (!targetTime) return;
-
-      let cached = tickerCache.get(t) as CacheEntry;
-      if (!cached) {
-        cached = { candlestickData: [], histogramData: [], apiVolume: 0 };
-        tickerCache.set(t, cached);
-      }
-
-      const close = Number((kafkaData as any).price || kafkaData.endPrice || 0);
-      if (close === 0 || isNaN(close)) return; // 0이거나 유효하지 않으면 업데이트 스킵
-      const open = Number(kafkaData.startPrice || close);
-      const high = Number(kafkaData.highPrice || close);
-      const low = Number(kafkaData.lowPrice || close);
-      const volume = Number((kafkaData as any).volume || 0);
-
-      if (isNaN(close)) return;
-
-      // --- Update Logic ---
-      const cIndex = cached.candlestickData.findIndex(
-        (item) => getTimeStr(item.time) === targetTime,
-      );
-      let finalVolume = volume;
-
-      if (cIndex !== -1) {
-        const candle = cached.candlestickData[cIndex];
-
-        // 기존 봉 업데이트 (High, Low, Close 갱신)
-        candle.high = Math.max(candle.high, high);
-        candle.low = Math.min(candle.low, low);
-        candle.close = close;
-
-        // Volume 처리: API 기준 날짜와 비교하여 누적 여부 결정
-        if (t !== "daily" || (cached.apiDate && kafkaTime > cached.apiDate)) {
-          finalVolume = (cached.apiVolume || 0) + volume;
-        } else {
-          // 같은 날짜(혹은 과거) 데이터인 경우: Kafka에서 오는 누적 볼륨으로 대체
-          finalVolume = volume;
-        }
-        cached.histogramData[cIndex].value = finalVolume;
-        cached.histogramData[cIndex].color =
-          candle.open <= candle.close ? "#d25357" : "#5d83ee";
-      } else {
-        // 새로운 기간의 봉 생성
-        // 새로운 기간의 봉 생성. 주/월/년 차트의 경우, API에서 제공한 불완전한 현재 기간 봉이 있을 수 있으므로 병합을 시도.
-        const baseCandle =
-          t !== "daily"
-            ? cached.candlestickData.find(
-                (c) => getTimeStr(c.time) === targetTime,
-              )
-            : undefined;
-
-        const openToUse = baseCandle ? baseCandle.open : open;
-        const highToUse = baseCandle ? Math.max(baseCandle.high, high) : high;
-        const lowToUse = baseCandle ? Math.min(baseCandle.low, low) : low;
-
-        if (t !== "daily" || (cached.apiDate && kafkaTime > cached.apiDate)) {
-          const baseVolume = baseCandle
-            ? cached.histogramData.find(
-                (h) => getTimeStr(h.time) === targetTime,
-              )?.value || 0
-            : 0;
-          finalVolume = baseVolume + volume;
-        }
-
-        cached.candlestickData.push({
-          time: targetTime as Time,
-          open: openToUse,
-          high: highToUse,
-          low: lowToUse,
-          close,
-        });
-        cached.histogramData.push({
-          time: targetTime as Time,
-          value: finalVolume,
-          color: openToUse <= close ? "#d25357" : "#5d83ee",
-        });
-
-        // 새 봉이 생겼으므로 캐시 정렬
-        cached.candlestickData = deduplicateAndSort(cached.candlestickData);
-        cached.histogramData = deduplicateAndSort(cached.histogramData);
-      }
-
-      // 현재 보고 있는 차트 타입과 일치하면 차트 UI 즉시 업데이트
-      if (t === type) {
-        const currentCandle = cached.candlestickData.find(
-          (d) => getTimeStr(d.time) === targetTime,
-        );
-        const currentHist = cached.histogramData.find(
-          (d) => getTimeStr(d.time) === targetTime,
-        );
-
-        if (currentCandle && candlestickSeriesRef.current) {
-          const { page, ...candleUpdate } = currentCandle;
-          candlestickSeriesRef.current.update(
-            candleUpdate as CandlestickData<Time>,
-          );
-        }
-        if (currentHist && histogramSeriesRef.current) {
-          const { page, ...histUpdate } = currentHist;
-          histogramSeriesRef.current.update(histUpdate as HistogramData<Time>);
-        }
-      }
-    });
-  }, [lastMessage, ticker, type]);
-
   // [Sync Logic] currentPriceInfo가 변경될 때 차트 데이터 동기화
   // (초기 로딩 이후, 부모 컴포넌트로부터 갱신된 최신 가격 정보를 차트에 반영)
   useEffect(() => {
@@ -609,9 +482,11 @@ const StockChart: React.FC<StockChartProps> = ({
 
     if (!cached || cached.candlestickData.length === 0) return;
 
-    // 1. 현재 시간(오늘)을 기준으로 차트 타입에 맞는 '타겟 시간' 계산
-    const now = new Date();
-    const alignedTime = getAlignedTime(now.toISOString(), type) as Time;
+    // 정확한 시간 일치를 위해 currentPriceInfo에 포함된 실제 Kafka date 사용 (없을 시 fallback)
+    const latestDate = normalizeDate(
+      (currentPriceInfo as any).date || new Date().toISOString(),
+    ) as string;
+    const alignedTime = getAlignedTime(latestDate, type) as Time;
     if (!alignedTime) return;
 
     const lastIdx = cached.candlestickData.length - 1;
@@ -621,33 +496,39 @@ const StockChart: React.FC<StockChartProps> = ({
     let targetCandle: ExtendedCandlestickData;
     let isNewBar = false;
 
+    const currentPrice = Number(
+      (currentPriceInfo as any).price || currentPriceInfo.endPrice,
+    );
+    const openPrice = Number(
+      (currentPriceInfo as any).startPrice || currentPrice,
+    );
+    const highPrice = currentPriceInfo.highPrice || currentPrice;
+    const lowPrice = currentPriceInfo.lowPrice || currentPrice;
+
     if (String(alignedTime) === lastTimeStr) {
       // (A) 같은 기간: 업데이트
       targetCandle = {
         ...lastCandle,
-        close: currentPriceInfo.endPrice,
-        high: Math.max(lastCandle.high, currentPriceInfo.highPrice),
-        low: Math.min(lastCandle.low, currentPriceInfo.lowPrice),
+        close: currentPrice,
+        high: Math.max(lastCandle.high, highPrice),
+        low: Math.min(lastCandle.low, lowPrice),
       };
     } else if (String(alignedTime) > lastTimeStr) {
       // (B) 새로운 기간: 추가
       isNewBar = true;
-      // [수정] 스냅샷/실시간 필드인 price를 먼저 확인합니다.
-      const currentPrice = Number((currentPriceInfo as any).price || currentPriceInfo.endPrice);
-      const openPrice = Number((currentPriceInfo as any).startPrice || currentPrice);
-     
+
       targetCandle = {
         time: alignedTime,
         open: openPrice,
-        high: Math.max(openPrice, currentPriceInfo.highPrice || currentPrice),
-        low: Math.min(openPrice, currentPriceInfo.lowPrice || currentPrice),
-        close: currentPrice, 
+        high: Math.max(openPrice, highPrice),
+        low: Math.min(openPrice, lowPrice),
+        close: currentPrice,
       };
     } else {
       return;
     }
 
-    candlestickSeriesRef.current.update(targetCandle);
+    candlestickSeriesRef.current.update(targetCandle as CandlestickData<Time>);
 
     if (isNewBar) {
       cached.candlestickData.push(targetCandle);
@@ -656,18 +537,25 @@ const StockChart: React.FC<StockChartProps> = ({
       cached.candlestickData[lastIdx] = targetCandle;
     }
 
-    // 거래량 업데이트 (Daily 차트이거나 새로운 봉이 생성된 경우에만 반영)
-    if (
-      currentPriceInfo.volume !== undefined &&
-      (type === "daily" || isNewBar)
-    ) {
+    // 거래량 업데이트 로직
+    if (currentPriceInfo.volume !== undefined) {
+      let newVolume = Number(currentPriceInfo.volume);
+      // 주/월/년 차트의 같은 봉인 경우 API 볼륨과 오늘의 볼륨을 합산
+      if (type !== "daily" && !isNewBar) {
+        if (cached.apiDate && latestDate > cached.apiDate) {
+          newVolume = (cached.apiVolume || 0) + Number(currentPriceInfo.volume);
+        } else {
+          newVolume = Number(currentPriceInfo.volume);
+        }
+      }
+
       const updatedHist: ExtendedHistogramData = {
         time: alignedTime,
-        value: currentPriceInfo.volume,
+        value: newVolume,
         color: targetCandle.open <= targetCandle.close ? "#d25357" : "#5d83ee",
       };
 
-      histogramSeriesRef.current.update(updatedHist);
+      histogramSeriesRef.current.update(updatedHist as HistogramData<Time>);
 
       if (isNewBar) {
         cached.histogramData.push(updatedHist);
@@ -711,26 +599,66 @@ const StockChart: React.FC<StockChartProps> = ({
         latestInfo.ticker === ticker &&
         result.candlestickData.length > 0
       ) {
+        const latestDate = normalizeDate(
+          (latestInfo as any).date || new Date().toISOString(),
+        ) as string;
+        const targetTime = getAlignedTime(latestDate, type) as Time;
+
         const lastIdx = result.candlestickData.length - 1;
         const lastCandle = result.candlestickData[lastIdx];
+        const lastTimeStr = getTimeStr(lastCandle.time);
 
-        // Patch the last candle with the latest known price
-        result.candlestickData[lastIdx] = {
-          ...lastCandle,
-          close: latestInfo.endPrice,
-          high: Math.max(lastCandle.high, latestInfo.highPrice),
-          low: Math.min(lastCandle.low, latestInfo.lowPrice),
-        };
+        const currentPrice = Number(
+          (latestInfo as any).price || latestInfo.endPrice,
+        );
+        const openPrice = Number(
+          (latestInfo as any).startPrice || currentPrice,
+        );
+        const highPrice = latestInfo.highPrice || currentPrice;
+        const lowPrice = latestInfo.lowPrice || currentPrice;
 
-        // For daily chart, we can also sync volume confidently
-        if (type === "daily" && latestInfo.volume !== undefined) {
-          const histIdx = result.histogramData.findIndex(
-            (h) => getTimeStr(h.time) === getTimeStr(lastCandle.time),
-          );
-          if (histIdx !== -1) {
-            result.histogramData[histIdx].value = latestInfo.volume;
-            result.histogramData[histIdx].color =
-              lastCandle.open <= latestInfo.endPrice ? "#d25357" : "#5d83ee";
+        if (String(targetTime) === lastTimeStr) {
+          result.candlestickData[lastIdx] = {
+            ...lastCandle,
+            close: currentPrice,
+            high: Math.max(lastCandle.high, highPrice),
+            low: Math.min(lastCandle.low, lowPrice),
+          };
+
+          if (latestInfo.volume !== undefined) {
+            let newVolume = Number(latestInfo.volume);
+            if (type !== "daily") {
+              if (result.apiDate && latestDate > result.apiDate) {
+                newVolume = (result.apiVolume || 0) + Number(latestInfo.volume);
+              } else {
+                newVolume = Number(latestInfo.volume);
+              }
+            }
+            const histIdx = result.histogramData.findIndex(
+              (h) => getTimeStr(h.time) === lastTimeStr,
+            );
+            if (histIdx !== -1) {
+              result.histogramData[histIdx].value = newVolume;
+              result.histogramData[histIdx].color =
+                lastCandle.open <= currentPrice ? "#d25357" : "#5d83ee";
+            }
+          }
+        } else if (String(targetTime) > lastTimeStr) {
+          const newCandle: ExtendedCandlestickData = {
+            time: targetTime,
+            open: openPrice,
+            high: Math.max(openPrice, highPrice),
+            low: Math.min(openPrice, lowPrice),
+            close: currentPrice,
+          };
+          result.candlestickData.push(newCandle);
+
+          if (latestInfo.volume !== undefined) {
+            result.histogramData.push({
+              time: targetTime,
+              value: Number(latestInfo.volume),
+              color: openPrice <= currentPrice ? "#d25357" : "#5d83ee",
+            });
           }
         }
       }

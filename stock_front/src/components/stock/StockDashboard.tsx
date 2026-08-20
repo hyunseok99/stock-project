@@ -2,7 +2,12 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Box, Typography, IconButton } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import "./StockDashboard.css";
-import type { Stock, KafkaData, StockPriceUpdate } from "../../types/stock";
+import type {
+  Stock,
+  KafkaData,
+  StockPriceUpdate,
+  MarketStatusUpdate,
+} from "../../types/stock";
 import StockPriceList from "./StockPriceList";
 import StockChart from "./StockChart";
 import StockReport from "./StockReport";
@@ -27,7 +32,6 @@ const StockDashboard: React.FC = () => {
     const saved = localStorage.getItem("myHoldings");
     return saved ? JSON.parse(saved) : [];
   });
-   
 
   // 데이터가 변경될 때마다 localStorage에 저장
   useEffect(() => {
@@ -49,32 +53,95 @@ const StockDashboard: React.FC = () => {
 
         if (tickersData.length > 0) {
           const initialData = tickersData.slice(0, PAGE_SIZE);
-          
           setStockData(initialData);
           setHasMore(tickersData.length > PAGE_SIZE);
           setPage(1);
-          
-          // 초기 선택 주식 설정 (첫 번째 주식)
-          if (!selectedStock && initialData.length > 0) {
-            setSelectedStock(initialData[0]);
-          }
+
+          // 첫 번째 주식을 기본 선택
+          if (initialData.length > 0) setSelectedStock(initialData[0]);
         }
       } catch (error) {}
       setLoading(false);
     };
     init();
   }, []);
-  
 
   // 웹소켓 실시간 가격 업데이트 로직 추가
   useEffect(() => {
-    if (!lastMessage || Array.isArray(lastMessage)) return;
-    
-    
-    // 2. live stream
-    const kafkaData: KafkaData = lastMessage;
-    
-    if (!kafkaData.ticker || kafkaData.ticker === "-1") {
+    if (!lastMessage || !lastMessage.payload) return;
+
+    const { payload } = lastMessage;
+
+    // 1. 스냅샷(배열) 데이터 수신 시 최초 상태 즉시 초기화 로직
+    if (Array.isArray(payload)) {
+      const snapshot = payload as StockPriceUpdate[];
+
+      setStockData((prev) =>
+        prev.map((item) => {
+          const found = snapshot.find((s) => s.ticker === item.ticker);
+          if (found) {
+            return {
+              ...item,
+              endPrice: Number((found as any).price || found.endPrice),
+              diff: found.diff !== undefined ? Number(found.diff) : item.diff,
+              diffRate:
+                found.diffRate !== undefined
+                  ? Number(found.diffRate)
+                  : item.diffRate,
+              highPrice: found.highPrice
+                ? Number(found.highPrice)
+                : item.highPrice,
+              lowPrice: found.lowPrice ? Number(found.lowPrice) : item.lowPrice,
+              startPrice: (found as any).startPrice
+                ? Number((found as any).startPrice)
+                : item.startPrice,
+              volume:
+                (found as any).volume !== undefined
+                  ? Number((found as any).volume)
+                  : item.volume,
+              date: (found as any).date || (item as any).date,
+              highlightAnimation: "",
+            };
+          }
+          return item;
+        }),
+      );
+
+      if (selectedStock) {
+        const found = snapshot.find((s) => s.ticker === selectedStock.ticker);
+        if (found) {
+          setSelectedStock((prev) => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              endPrice: Number((found as any).price || found.endPrice),
+              diff: found.diff !== undefined ? Number(found.diff) : prev.diff,
+              diffRate:
+                found.diffRate !== undefined
+                  ? Number(found.diffRate)
+                  : prev.diffRate,
+              highPrice: found.highPrice
+                ? Number(found.highPrice)
+                : prev.highPrice,
+              lowPrice: found.lowPrice ? Number(found.lowPrice) : prev.lowPrice,
+              startPrice: (found as any).startPrice
+                ? Number((found as any).startPrice)
+                : prev.startPrice,
+              volume:
+                (found as any).volume !== undefined
+                  ? Number((found as any).volume)
+                  : prev.volume,
+              date: (found as any).date || (prev as any).date,
+            };
+          });
+        }
+      }
+      return;
+    }
+
+    const kafkaData: KafkaData = payload;
+
+    if ((kafkaData as MarketStatusUpdate).ticker === "-1") {
       // HomePage와 동일한 시장 상태 처리 로직이 필요하다면 여기에 추가
       return;
     }
@@ -105,13 +172,20 @@ const StockDashboard: React.FC = () => {
           update.diffRate !== undefined
             ? Number(update.diffRate)
             : currentStock.diffRate,
-        date: update.date || currentStock.date,
         highPrice: update.highPrice
           ? Number(update.highPrice)
           : currentStock.highPrice,
         lowPrice: update.lowPrice
           ? Number(update.lowPrice)
           : currentStock.lowPrice,
+        startPrice: (update as any).startPrice
+          ? Number((update as any).startPrice)
+          : currentStock.startPrice,
+        volume:
+          (update as any).volume !== undefined
+            ? Number((update as any).volume)
+            : currentStock.volume,
+        date: (update as any).date || (currentStock as any).date,
         highlightAnimation: animationClass,
       };
 
@@ -148,6 +222,14 @@ const StockDashboard: React.FC = () => {
             ? Number(update.highPrice)
             : prev.highPrice,
           lowPrice: update.lowPrice ? Number(update.lowPrice) : prev.lowPrice,
+          startPrice: (update as any).startPrice
+            ? Number((update as any).startPrice)
+            : prev.startPrice,
+          volume:
+            (update as any).volume !== undefined
+              ? Number((update as any).volume)
+              : prev.volume,
+          date: (update as any).date || (prev as any).date,
         };
       });
     }
