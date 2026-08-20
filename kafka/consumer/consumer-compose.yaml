@@ -1,0 +1,19 @@
+services:
+  stock-consumer:
+    build: .
+    container_name: stock_consumer
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - ./kafka_consumer.env
+    restart: always
+    networks:
+      - kafka-set_default
+
+networks:
+  kafka-set_default:
+    external: true
