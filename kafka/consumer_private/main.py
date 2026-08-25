@@ -4,7 +4,7 @@ import socket
 import metrics
 from sqlalchemy import text
 from private_kafka import create_consumer, create_producer
-from db_connection import get_engine, get_all_valid_tickers, get_user_balance_from_db, get_user_stock_quantity_from_db, is_flush_required, bulk_insert_order_history
+from db_connection import get_engine, get_all_valid_tickers, get_user_balance_from_db, get_user_stock_quantity_from_db, is_flush_required, bulk_insert_order_history, sync_user_stock_after_fill
 from private_redis import create_redis_client, process_user_order
 
 POD_NAME = socket.gethostname()
@@ -144,6 +144,15 @@ def main():
                             msg = "알 수 없는 체결 오류가 발생했습니다."
                         
                         metrics.ORDER_PROCESS_TOTAL.labels(order_type=order_type, status=status_str).inc()
+
+                        # [WORK 3.5] 체결 성공 시 user_stocks 즉시 반영 (실시간 포지션 동기화)
+                        # - SSE 알림 발행보다 '먼저' 실행되어야 프론트가 알림 수신 후
+                        #   /api/portfolio 재조회할 때 최신 보유분을 받을 수 있음
+                        # - 본 함수 실패 시 settlement cronjob이 자정에 보정하므로 체결 처리는 계속 진행
+                        if res_balance >= 0:
+                            synced = sync_user_stock_after_fill(engine, user_id, ticker, price, quantity, order_type)
+                            if not synced:
+                                print(f"⚠️ [동기화 지연] 자정 settlement가 보정 예정 - User: {user_id}, Ticker: {ticker}")
 
                         # [알림 전송] 카프카 체결 완료/실패 이벤트 토픽 발행
                         completed_event = {

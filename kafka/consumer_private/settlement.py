@@ -186,15 +186,15 @@ def run_settlement():
             SELECT user_id, ticker, order_type, price, quantity
             FROM order_history
             WHERE status = 'SUCCESS' 
-              AND id > :last_settled_id 
-              AND id <= :current_max_id
+              AND id > :last_settled_order_id 
+              AND id <= :current_max_order_id
             ORDER BY id ASC
         """)
 
         with engine.connect() as conn:
             today_orders = conn.execute(
                 fetch_orders_sql, 
-                {"last_settled_id": last_settled_id, "current_max_id": current_max_id}
+                {"last_settled_order_id": last_settled_order_id, "current_max_order_id": current_max_order_id}
             ).fetchall()
 
         user_stock_map = {}
@@ -254,21 +254,29 @@ def run_settlement():
         all_users = conn.execute(text("SELECT user_id, balance FROM users")).fetchall()
         all_stocks = conn.execute(text("SELECT user_id, ticker, quantity FROM user_stocks WHERE quantity > 0")).fetchall()
 
-    old_stock_keys = redis_client.keys("user:stock:*")
-    if old_stock_keys:
-        redis_client.delete(*old_stock_keys)
-
+    # [개선] 기존 '전체 DELETE 후 SET' 방식은 DELETE~SET 사이에 체결이 들어오면
+    #        보유 수량이 소실될 수 있어(체결 중 경합), '덮어쓰기 후 만료키 정리'로 변경:
+    #        1) DB 기준값을 먼저 덮어써서 어떤 시점에도 유효한 수량이 존재하도록 보장
+    #        2) 이후 보유 수량이 0이 되었거나 더 이상 유효하지 않은 구키만 정리
     pipe = redis_client.pipeline()
 
+    new_stock_keys = set()
     for u in all_users:
         pipe.set(f"user:balance:{u.user_id}", u.balance)
 
     for s in all_stocks:
-        pipe.set(f"user:stock:{s.user_id}:{s.ticker}", s.quantity)
+        stock_key = f"user:stock:{s.user_id}:{s.ticker}"
+        pipe.set(stock_key, s.quantity)
+        new_stock_keys.add(stock_key)
 
     pipe.execute()
 
-    print(f"✅ [3단계 완료] 잔고 {len(all_users)}건, 보유 주식 {len(all_stocks)}건 Redis 캐시 재워밍 완료.")
+    old_stock_keys = redis_client.keys("user:stock:*")
+    stale_keys = [k for k in old_stock_keys if k not in new_stock_keys]
+    if stale_keys:
+        redis_client.delete(*stale_keys)
+
+    print(f"✅ [3단계 완료] 잔고 {len(all_users)}건, 보유 주식 {len(new_stock_keys)}건 Redis 캐시 재워밍 완료 (정리된 만료키: {len(stale_keys)}건).")
 
     elapsed_time = time.time() - start_time
     print(f"🎉 [Settlement 완료] 전체 정산 및 정합성 검증 소요 시간: {elapsed_time:.2f}초\n")

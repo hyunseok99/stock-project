@@ -115,8 +115,8 @@ export function subscribeToNotificationChannel<T = unknown>({
 
   let cancelled = false;
 
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
-  const url = `${baseUrl}/api/notification/subscribe/${encodeURIComponent(userId)}`;
+  const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+  const url = `${rawBaseUrl}/api/notification/subscribe/${encodeURIComponent(userId)}`;
 
   /** 한 번의 SSE 연결 시도를 수행 */
   const connectOnce = async (): Promise<void> => {

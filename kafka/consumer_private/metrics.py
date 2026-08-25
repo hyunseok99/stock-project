@@ -30,6 +30,21 @@ DB_BATCH_SIZE = Histogram(
     buckets=[1, 10, 50, 100, 250, 500]
 )
 
+# 6. 체결 직후 user_stocks 실시간 동기화 카운터 (성공/실패)
+USER_STOCK_SYNC_TOTAL = Counter(
+    'user_stock_sync_total',
+    'Total number of real-time user_stocks upsert attempts after fill',
+    ['order_type', 'result']  # order_type: BUY, SELL / result: SUCCESS, FAILED
+)
+
+# 7. user_stocks 실시간 동기화 소요 시간
+USER_STOCK_SYNC_LATENCY = Histogram(
+    'user_stock_sync_latency_seconds',
+    'Latency of real-time user_stocks upsert after fill',
+    ['order_type'],
+    buckets=[0.001, 0.005, 0.01, 0.05, 0.1]
+)
+
 # 5. 프로메테우스 익스포터 서버 시작 & 라벨 선초기화 함수
 def start_metrics_server(port=8000):
     start_http_server(port)

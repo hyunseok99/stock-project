@@ -15,12 +15,13 @@ import React from "react";
 import StockPriceList from "../components/stock/StockPriceList";
 import StockChart from "../components/stock/StockChart";
 import StockReport from "../components/stock/StockReport";
-import type { MyHolding } from "../components/stock/StockReport";
 import DepositModal from "../components/stock/DepositModal";
 import BuyModal from "../components/stock/BuyModal";
 import { useWebSocket } from "../contexts/WebSocketContext";
-import { fetchTickers, initUser } from "../api/stockApi";
+import { fetchTickers, initUser, fetchPortfolio, getBalance } from "../api/stockApi";
 import { useOrderNotifications } from "../hooks/useOrderNotifications";
+import WithdrawModal from "../components/stock/WithdrawModal";
+import type { Holding } from "../api/stockApi";
 import type {
   Stock,
   KafkaData,
@@ -44,8 +45,9 @@ const HomePage: React.FC = () => {
     message: "장 상태를 확인하고 있습니다.",
   });
 
-  // 입금 / 구매 모달 및 알림 상태
+  // 입금 / 출금 / 구매 모달 및 알림 상태
   const [depositOpen, setDepositOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{
     message: string;
@@ -62,7 +64,8 @@ const HomePage: React.FC = () => {
   useEffect(() => {
     if (!lastNotification) return;
 
-    const isSuccess = lastNotification.status === "SUCCESS";
+    const s = (lastNotification.status ?? "").toUpperCase();
+    const isSuccess = !s.includes("FAIL");
     setSnackbar({
       severity: isSuccess ? "success" : "error",
       message: isSuccess
@@ -75,29 +78,76 @@ const HomePage: React.FC = () => {
   const isTickersLoaded = useRef(false);
   const snapshotBuffer = useRef<StockPriceUpdate[] | null>(null);
 
-  // 보유 주식 상태 관리 (localStorage 연동)
-  const [myHoldings, setMyHoldings] = useState<MyHolding[]>(() => {
-    const saved = localStorage.getItem("myHoldings");
-    return saved ? JSON.parse(saved) : [];
-  });
+    // 보유 주식 상태 관리 (백엔드 API 기반)
+  const [holdings, setHoldings] = useState<Holding[]>([]);
 
-  // 데이터가 변경될 때마다 localStorage에 저장
+  // 원화 잔액 상태 관리 (백엔드 API 기반: Redis 우선 조회)
+  const [balance, setBalance] = useState<number | null>(null);
+
+  // 잔액 재조회 함수
+  const refetchBalance = useCallback(async () => {
+    if (!userId) return;
+    const value = await getBalance(userId);
+    setBalance(value);
+  }, [userId]);
+
+  // 포트폴리오 재조회 함수
+  const refetchPortfolio = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const data = await fetchPortfolio(userId);
+      setHoldings(data);
+    } catch (err) {
+      console.error("Failed to fetch portfolio:", err);
+    }
+  }, [userId]);
+
+  // SSE 체결 알림 수신 시 포트폴리오/잔액 재조회
+  // - status 값 형식과 무관하게 항상 동기화 (서버 기준 최신 상태 보장)
+  // - order-process 쪽 user_stocks/users 반영이 알림보다 늦을 수 있어
+  //   즉시 1회 + 1.5초 후 1회 재시도로 커버
   useEffect(() => {
-    localStorage.setItem("myHoldings", JSON.stringify(myHoldings));
-  }, [myHoldings]);
+    if (!lastNotification) return;
+
+    refetchPortfolio();
+    refetchBalance();
+
+    const retryTimer = setTimeout(() => {
+      refetchPortfolio();
+      refetchBalance();
+    }, 1500);
+
+    return () => clearTimeout(retryTimer);
+  }, [lastNotification, refetchPortfolio, refetchBalance]);
 
   // Initial data load + guest init
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       try {
-        // 0. 게스트 유저 초기화 (DB + Redis 초기 잔고 워밍) - 1회
+                // 0. 게스트 유저 초기화 (DB + Redis 초기 잔고 워밍) - 1회
         if (userId && !initUserDone.current) {
           initUserDone.current = true;
           try {
             await initUser(userId);
           } catch (err) {
             console.error("Guest init error:", err);
+          }
+        }
+
+        // 0-1. 보유 주식 포트폴리오 조회 (백엔드 API)
+        if (userId) {
+          try {
+            await refetchPortfolio();
+          } catch (err) {
+            console.error("Portfolio fetch error:", err);
+          }
+
+          // 0-2. 현재 원화 잔액 조회 (백엔드 API: Redis 우선)
+          try {
+            await refetchBalance();
+          } catch (err) {
+            console.error("Balance fetch error:", err);
           }
         }
 
@@ -382,44 +432,63 @@ const HomePage: React.FC = () => {
   return (
     <Box className="home-page-container">
       <Container maxWidth="xl">
-        <Grid
-          container
-          spacing={3}
-          wrap="nowrap"
+        <Box
           className="home-page-header"
-          sx={{ minWidth: "1200px" }}
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 2,
+            mb: 3,
+            mt: 1,
+            paddingLeft: 1,
+          }}
         >
-          <Grid size={{ xs: 9 }}>
-            <Box>
-              <Typography variant="h4" className="home-page-title">
-                Market Dashboard
-              </Typography>
-              <Typography variant="body1" className="home-page-subtitle">
-                Real-time stock market tracking
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid size={{ xs: 2 }}>
-            <Box className="market-status-container">
+          <Box sx={{ flex: "1 1 auto", minWidth: "250px" }}>
+            <Typography variant="h4" className="home-page-title">
+              Market Dashboard
+            </Typography>
+            <Typography variant="body1" className="home-page-subtitle">
+              Real-time stock market tracking
+            </Typography>
+          </Box>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              flexWrap: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            <Box
+              className="market-status-container"
+              sx={{
+                px: 3,
+                py: 1.5,
+                height: "48px",
+                width: "auto",
+                display: "flex",
+                alignItems: "center",
+                borderRadius: "14px",
+                border: "1px solid #e0e0e0",
+                boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)",
+                backgroundColor: "#ffffff",
+                boxSizing: "border-box",
+                gap: 1.5,
+              }}
+            >
               <div
                 className={`status-dot ${marketStatus.isOpen ? "open" : "closed"}`}
+                style={{ flexShrink: 0 }}
               />
-              <Typography className="status-text">
+              <Typography className="status-text" sx={{ whiteSpace: "nowrap" }}>
                 {marketStatus.message}
               </Typography>
             </Box>
-          </Grid>
-          <Grid size={{ xs: 1 }} sx={{ textAlign: "center" }}>
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={() => setDepositOpen(true)}
-              sx={{ whiteSpace: "nowrap", minWidth: 84 }}
-            >
-              입금
-            </Button>
-          </Grid>
-        </Grid>
+          </Box>
+        </Box>
 
         <Grid
           container
@@ -545,11 +614,13 @@ const HomePage: React.FC = () => {
                   </Box>
                 </Paper>
               ) : (
-                <StockReport
-                  allTickers={allTickers}
+                                <StockReport
                   stockData={stockData}
-                  myHoldings={myHoldings}
-                  setMyHoldings={setMyHoldings}
+                  holdings={holdings}
+                  balance={balance}
+                  userId={userId}
+                  onDepositClick={() => setDepositOpen(true)}
+                  onWithdrawClick={() => setWithdrawOpen(true)}
                 />
               )}
             </Box>
@@ -568,14 +639,28 @@ const HomePage: React.FC = () => {
           </Grid>
         </Grid>
 
-        {/* 입금 / 구매 모달 */}
+        {/* 입금 / 출금 / 구매 모달 */}
         <DepositModal
           open={depositOpen}
           onClose={() => setDepositOpen(false)}
           userId={userId}
-          onDeposited={() =>
-            setSnackbar({ severity: "success", message: "입금 요청이 완료되었습니다." })
-          }
+          onDeposited={() => {
+            setSnackbar({ severity: "success", message: "입금이 완료되었습니다." });
+            // Redis에 즉시 반영되므로 202 수신 후 잔액 재조회로 최신화
+            refetchBalance();
+          }}
+        />
+
+        <WithdrawModal
+          open={withdrawOpen}
+          onClose={() => setWithdrawOpen(false)}
+          userId={userId}
+          balance={balance}
+          onWithdrawn={() => {
+            setSnackbar({ severity: "success", message: "출금이 완료되었습니다." });
+            // Redis에 즉시 반영되므로 202 수신 후 잔액 재조회로 최신화
+            refetchBalance();
+          }}
         />
 
         <BuyModal

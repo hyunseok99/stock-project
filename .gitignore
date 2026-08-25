@@ -18,3 +18,12 @@ kafka-set/__pycache__/
 kafka-set/venv/
 # 만약 도커 볼륨 데이터를 폴더 내부에 저장한다면 해당 폴더도 제외
 # kafka-set/data/
+
+# --- back (Java/Gradle) 실제 경로 ---
+back/.gradle/
+back/build/
+back/out/
+
+# --- kafka consumer (Python) ---
+kafka/**/__pycache__/
+*.pyc

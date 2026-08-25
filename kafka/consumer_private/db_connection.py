@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
+from metrics import USER_STOCK_SYNC_TOTAL, USER_STOCK_SYNC_LATENCY
 
 # Batch 
 BATCH_SIZE = 500
@@ -78,6 +79,74 @@ def get_user_stock_quantity_from_db(engine, user_id: str, ticker: str) -> int:
 def is_flush_required(buffer_size: int, last_flush_time: float) -> bool:
     """배치 플러시 조건(500개 누적 OR 5초 경과)을 충족했는지 검사합니다."""
     return buffer_size >= BATCH_SIZE or (time.time() - last_flush_time) >= BATCH_TIMEOUT
+
+def sync_user_stock_after_fill(engine, user_id: str, ticker: str, price: int, quantity: int, order_type: str) -> bool:
+    """
+    [실시간 포지션 반영] 주문 체결 성공 직후 user_stocks 테이블을 즉시 갱신합니다.
+    
+    - BUY : 신규 INSERT 또는 기존 row에 수량 추가 + 가중평균 평단 재계산
+            (ON DUPLICATE KEY UPDATE 절 내 평단 계산 시 '기존 quantity'가 필요하므로
+             average_price를 먼저 계산한 뒤 quantity를 증가시키는 순서)
+    - SELL: 수량 차감, 전량 매도(quantity <= 0) 시 해당 row 삭제
+    
+    Redis는 이미 반영된 상태이며, 본 함수 실패 시 settlement cronjob이 자정에 보정합니다.
+    
+    :return: 성공 여부(bool)
+    """
+    success = False
+    sync_start = time.time()
+    try:
+        with engine.begin() as conn:
+            if order_type == "BUY":
+                sql = text("""
+                    INSERT INTO user_stocks (user_id, ticker, quantity, average_price)
+                    VALUES (:user_id, :ticker, :quantity, :price)
+                    ON DUPLICATE KEY UPDATE
+                        average_price = ROUND((average_price * quantity + :price * VALUES(quantity))
+                                              / (quantity + VALUES(quantity))),
+                        quantity = quantity + VALUES(quantity)
+                """)
+                conn.execute(sql, {
+                    "user_id": str(user_id),
+                    "ticker": ticker,
+                    "quantity": quantity,
+                    "price": price,
+                })
+            else:  # SELL
+                decrease_sql = text("""
+                    UPDATE user_stocks
+                    SET quantity = GREATEST(0, quantity - :quantity)
+                    WHERE user_id = :user_id AND ticker = :ticker AND quantity > 0
+                """)
+                result = conn.execute(decrease_sql, {
+                    "user_id": str(user_id),
+                    "ticker": ticker,
+                    "quantity": quantity,
+                })
+
+                # 차감 대상 row가 존재했을 때만 전량매도(수량 0) 삭제 검사 → no-op DELETE 방지
+                if result.rowcount > 0:
+                    delete_sql = text("""
+                        DELETE FROM user_stocks
+                        WHERE user_id = :user_id AND ticker = :ticker AND quantity <= 0
+                    """)
+                    conn.execute(delete_sql, {
+                        "user_id": str(user_id),
+                        "ticker": ticker,
+                    })
+        success = True
+        return True
+
+    except SQLAlchemyError as e:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{now_str}] ❌ user_stocks 실시간 동기화 실패 (user_id={user_id}, ticker={ticker}, {order_type}): {e}")
+        return False
+
+    finally:
+        elapsed = time.time() - sync_start
+        USER_STOCK_SYNC_LATENCY.labels(order_type=order_type).observe(elapsed)
+        USER_STOCK_SYNC_TOTAL.labels(order_type=order_type,
+                                     result="SUCCESS" if success else "FAILED").inc()
 
 def bulk_insert_order_history(engine, records: list):
     """

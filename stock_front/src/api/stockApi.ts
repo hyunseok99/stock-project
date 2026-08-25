@@ -147,6 +147,100 @@ export const depositBalance = async (
 };
 
 /**
+ * 사용자의 보유 주식 포트폴리오를 백엔드에서 조회한다.
+ * @param userId - 조회할 사용자 ID
+ * @returns 보유 주식 정보 배열
+ */
+export interface Holding {
+  ticker: string;
+  name: string;
+  quantity: number;
+  purchasePrice: number;
+}
+
+export const fetchPortfolio = async (
+  userId: string,
+): Promise<Holding[]> => {
+  try {
+    const response = await axiosInstance.get(`/api/portfolio?userId=${userId}`);
+    const raw: Array<Partial<Holding>> = response.data ?? [];
+    return raw.map((h) => ({
+      ticker: h.ticker ?? "",
+      name: h.name ?? h.ticker ?? "",
+      quantity: h.quantity ?? 0,
+      purchasePrice: h.purchasePrice ?? 0,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch portfolio:", error);
+    return [];
+  }
+};
+
+// --- [추가] 원화 잔액 / 출금 / 거래 히스토리 ---
+
+/**
+ * 현재 원화 잔액을 조회한다. (Redis 우선, Key Miss 시 MariaDB fallback)
+ * @returns 잔액 (조회 실패 시 null)
+ */
+export const getBalance = async (userId: string): Promise<number | null> => {
+  try {
+    const response = await axiosInstance.get(`/api/balance`, {
+      params: { userId },
+    });
+    const raw = response.data as { balance?: number };
+    return typeof raw?.balance === "number" ? raw.balance : null;
+  } catch (error) {
+    console.error("Failed to fetch balance:", error);
+    return null;
+  }
+};
+
+/**
+ * 출금을 요청한다. (202 수락 응답 - Redis 즉시 반영, DB는 비동기 영속화)
+ */
+export const withdrawBalance = async (
+  userId: string,
+  amount: number,
+): Promise<void> => {
+  await axiosInstance.post("/api/balance/withdraw", { userId, amount });
+};
+
+/** 통합 거래 히스토리 항목 */
+export interface TradeHistoryItem {
+  id: number;
+  /** CASH(입출금) / ORDER(주문 체결) */
+  source: "CASH" | "ORDER";
+  /** DEPOSIT / WITHDRAWAL / BUY / SELL */
+  type: "DEPOSIT" | "WITHDRAWAL" | "BUY" | "SELL";
+  ticker?: string | null;
+  quantity?: number | null;
+  price?: number | null;
+  amount: number;
+  /** 입출금은 COMPLETED 고정 / 주문은 SUCCESS 등 */
+  status?: string | null;
+  /** ISO-8601 시각 */
+  timestamp?: string | null;
+}
+
+/**
+ * 유저의 입출금 + 주문 체결 통합 거래 히스토리를 최신순으로 조회한다.
+ */
+export const fetchTradeHistory = async (
+  userId: string,
+  limit: number = 30,
+): Promise<TradeHistoryItem[]> => {
+  try {
+    const response = await axiosInstance.get(`/api/history`, {
+      params: { userId, limit },
+    });
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (error) {
+    console.error("Failed to fetch trade history:", error);
+    return [];
+  }
+};
+
+/**
  * Requests a stock order (buy/sell).
  * @param order - The order request payload.
  * @returns Promise that resolves on success.

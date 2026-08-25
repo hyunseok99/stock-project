@@ -66,6 +66,30 @@ public class BalanceRedisRepository {
         }
     }
 
+    /**
+     * 현재 잔고 조회 (Key Miss 시 null 반환)
+     */
+    public Long getBalance(String userId) {
+        String redisKey = getKey(userId);
+        String value = redisTemplate.opsForValue().get(redisKey);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            log.warn("[Redis 잔고 파싱 실패] User: {}, Value: {}", userId, value);
+            return null;
+        }
+    }
+
+    /**
+     * DB 기준 잔고를 Redis에 재적재 (워밍)
+     */
+    public void setBalance(String userId, long balance) {
+        redisTemplate.opsForValue().set(getKey(userId), String.valueOf(balance));
+    }
+
     private String getKey(String userId) {
         return KEY_PREFIX + userId;
     }

@@ -11,15 +11,15 @@ import type {
 import StockPriceList from "./StockPriceList";
 import StockChart from "./StockChart";
 import StockReport from "./StockReport";
-import type { MyHolding } from "./StockReport";
-import { fetchTickers } from "../../api/stockApi";
+import type { Holding } from "../../api/stockApi";
+import { fetchTickers, fetchPortfolio } from "../../api/stockApi";
 import { useWebSocket } from "../../contexts/WebSocketContext";
 
 const PAGE_SIZE = 10;
 
 // Note: Sub-components will be implemented separately in follow-up steps.
 const StockDashboard: React.FC = () => {
-  const { lastMessage } = useWebSocket();
+  const { lastMessage, userId } = useWebSocket();
   const [allTickers, setAllTickers] = useState<Stock[]>([]);
   const [stockData, setStockData] = useState<Stock[]>([]);
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
@@ -27,16 +27,19 @@ const StockDashboard: React.FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // 보유 주식 상태 관리 (localStorage 연동)
-  const [myHoldings, setMyHoldings] = useState<MyHolding[]>(() => {
-    const saved = localStorage.getItem("myHoldings");
-    return saved ? JSON.parse(saved) : [];
-  });
+  // 보유 주식 상태 관리 (백엔드 API 기반)
+  const [holdings, setHoldings] = useState<Holding[]>([]);
 
-  // 데이터가 변경될 때마다 localStorage에 저장
-  useEffect(() => {
-    localStorage.setItem("myHoldings", JSON.stringify(myHoldings));
-  }, [myHoldings]);
+  // 포트폴리오 재조회 함수
+  const refetchPortfolio = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const data = await fetchPortfolio(userId);
+      setHoldings(data);
+    } catch (err) {
+      console.error("Failed to fetch portfolio:", err);
+    }
+  }, [userId]);
 
   // Initial placeholder for stock selection.
   // This will be triggered from the StockPriceList component.
@@ -60,11 +63,14 @@ const StockDashboard: React.FC = () => {
           // 첫 번째 주식을 기본 선택
           if (initialData.length > 0) setSelectedStock(initialData[0]);
         }
+
+        // 보유 주식 포트폴리오 조회 (백엔드 API)
+        await refetchPortfolio();
       } catch (error) {}
       setLoading(false);
     };
     init();
-  }, []);
+  }, [refetchPortfolio]);
 
   // 웹소켓 실시간 가격 업데이트 로직 추가
   useEffect(() => {
@@ -355,10 +361,8 @@ const StockDashboard: React.FC = () => {
               </div>
             ) : (
               <StockReport
-                allTickers={allTickers}
                 stockData={stockData}
-                myHoldings={myHoldings}
-                setMyHoldings={setMyHoldings}
+                holdings={holdings}
               />
             )}
           </Box>

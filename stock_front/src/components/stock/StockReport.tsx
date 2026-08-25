@@ -1,21 +1,17 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Box,
   Typography,
-  TextField,
   Button,
-  MenuItem,
-  Select,
-  FormControl,
-  InputLabel,
   Paper,
   Grid,
-  IconButton,
   Divider,
+  IconButton,
 } from "@mui/material";
-import DeleteIcon from "@mui/icons-material/Delete";
-import AddIcon from "@mui/icons-material/Add";
+import HistoryIcon from "@mui/icons-material/History";
 import type { Stock } from "../../types/stock";
+import type { Holding } from "../../api/stockApi";
+import HistoryModal from "./HistoryModal";
 import "./StockReport.css";
 
 const CHART_COLORS = [
@@ -27,108 +23,37 @@ const CHART_COLORS = [
   "#00d084",
 ];
 
-export interface MyHolding {
-  ticker: string;
-  name: string;
-  purchasePrice: number;
-  quantity: number;
-}
-
+// 백엔드 /api/portfolio 로 조회한 보유 주식을 표시하는 조회 전용 자산 리포트
 interface StockReportProps {
-  allTickers: Stock[];
   stockData: Stock[];
-  myHoldings: MyHolding[];
-  setMyHoldings: React.Dispatch<React.SetStateAction<MyHolding[]>>;
+  holdings: Holding[];
+  /** 현재 원화 잔액 (미조회 시 null) */
+  balance?: number | null;
+  userId?: string | null;
+  onDepositClick?: () => void;
+  onWithdrawClick?: () => void;
 }
 
 const StockReport: React.FC<StockReportProps> = ({
-  allTickers,
   stockData,
-  myHoldings,
-  setMyHoldings,
+  holdings,
+  balance,
+  userId,
+  onDepositClick,
+  onWithdrawClick,
 }) => {
-  const [newTicker, setNewTicker] = useState("");
-  const [newPrice, setNewPrice] = useState<number | "">("");
-  const [newQty, setNewQty] = useState<number | "">("");
-  const [errors, setErrors] = useState({
-    ticker: false,
-    price: false,
-    qty: false,
-  });
-
-  const handleAddStock = () => {
-    const newErrors = {
-      ticker: !newTicker,
-      price: newPrice === "" || newPrice <= 0,
-      qty: newQty === "" || newQty <= 0,
-    };
-
-    setErrors(newErrors);
-
-    // 하나라도 에러가 있으면 중단
-    if (Object.values(newErrors).some((error) => error)) {
-      if (newErrors.ticker) alert("종목을 선택해주세요.");
-      else if (newErrors.price || newErrors.qty)
-        alert("매수가와 수량은 0보다 커야 합니다.");
-      return;
-    }
-
-    const tickerInfo = allTickers.find((t) => t.ticker === newTicker);
-    if (!tickerInfo) return;
-
-    setMyHoldings((prev) => {
-      const existingIndex = prev.findIndex((h) => h.ticker === newTicker);
-      if (existingIndex !== -1) {
-        const existing = prev[existingIndex];
-        const totalQty = existing.quantity + Number(newQty);
-        // 가중 평균 단가 계산: (기존 총액 + 신규 총액) / 전체 수량
-        const totalCost =
-          existing.purchasePrice * existing.quantity +
-          Number(newPrice) * Number(newQty);
-
-        const updated = [...prev];
-        updated[existingIndex] = {
-          ...existing,
-          quantity: totalQty,
-          purchasePrice: totalCost / totalQty,
-        };
-        return updated;
-      }
-      return [
-        ...prev,
-        {
-          ticker: newTicker,
-          name: tickerInfo.tickerName,
-          purchasePrice: Number(newPrice),
-          quantity: Number(newQty),
-        },
-      ];
-    });
-
-    setNewTicker("");
-    setNewPrice("");
-    setNewQty("");
-    setErrors({
-      ticker: false,
-      price: false,
-      qty: false,
-    });
-  };
-
-  const handleDelete = (index: number) => {
-    setMyHoldings(myHoldings.filter((_, i) => i !== index));
-  };
-
+  // 거래 내역 모달 열림 상태 (히스토리 아이콘 클릭 시)
+  const [historyOpen, setHistoryOpen] = useState(false);
   // 실시간 데이터와 매칭하여 수익률 계산
   const reportData = useMemo(() => {
     let totalPurchase = 0;
     let totalEvaluation = 0;
 
-    const details = myHoldings.map((holding, index) => {
+    const details = holdings.map((holding, index) => {
       const liveStock = stockData.find((s) => s.ticker === holding.ticker);
       const currentPrice = liveStock
         ? liveStock.endPrice
-        : holding.purchasePrice;
+        : holding.purchasePrice ?? 0;
       const evaluation = currentPrice * holding.quantity;
       const purchaseAmount = holding.purchasePrice * holding.quantity;
       const profit = evaluation - purchaseAmount;
@@ -160,7 +85,7 @@ const StockReport: React.FC<StockReportProps> = ({
       totalProfit,
       totalProfitRate,
     };
-  }, [myHoldings, stockData]);
+  }, [holdings, stockData]);
 
   // 원형 차트를 위한 그라데이션 생성
   const pieChartStyle = useMemo(() => {
@@ -178,7 +103,81 @@ const StockReport: React.FC<StockReportProps> = ({
 
   return (
     <Box className="report-container h-full flex flex-col overflow-hidden">
-      <Typography className="report-title">내 자산 리포트</Typography>
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 1.5,
+        }}
+      >
+        <Typography className="report-title">내 자산 리포트</Typography>
+
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          {/* 현재 원화 잔액 */}
+          <Typography
+            variant="body1"
+            className="font-bold text-[#191f28]"
+            sx={{ mr: 0.5, whiteSpace: "nowrap" }}
+          >
+            {balance != null ? `${balance.toLocaleString()}원` : "-"}
+          </Typography>
+
+          {/* 출금 버튼 */}
+          {onWithdrawClick && (
+            <Button
+              variant="outlined"
+              color="error"
+              onClick={onWithdrawClick}
+              sx={{
+                whiteSpace: "nowrap",
+                minWidth: 72,
+                height: "40px",
+                borderRadius: "12px",
+                fontWeight: 600,
+                borderColor: "#f04452",
+                "&:hover": {
+                  borderColor: "#d93a48",
+                  backgroundColor: "rgba(240, 68, 82, 0.04)",
+                },
+              }}
+            >
+              출금
+            </Button>
+          )}
+
+          {/* 입금 버튼 */}
+          {onDepositClick && (
+            <Button
+              variant="contained"
+              sx={{
+                whiteSpace: "nowrap",
+                minWidth: 72,
+                height: "40px",
+                borderRadius: "12px",
+                fontWeight: 600,
+                backgroundColor: "#3182f6",
+                "&:hover": { backgroundColor: "#1b64da" },
+              }}
+              disableElevation
+              onClick={onDepositClick}
+            >
+              입금
+            </Button>
+          )}
+
+          {/* 거래 히스토리 아이콘 버튼 */}
+          <IconButton
+            size="small"
+            onClick={() => setHistoryOpen(true)}
+            aria-label="거래 내역 보기"
+            title="거래 내역"
+            sx={{ border: "1px solid #e5e8eb", borderRadius: "10px", color: "#4e5968" }}
+          >
+            <HistoryIcon fontSize="small" />
+          </IconButton>
+        </Box>
+      </Box>
 
       <Grid
         container
@@ -187,7 +186,7 @@ const StockReport: React.FC<StockReportProps> = ({
         wrap="nowrap"
         sx={{ flex: 1, overflow: "hidden" }}
       >
-        {/* 왼쪽: 요약 및 차트 */}
+        {/* 위쪽: 요약 및 차트 */}
         <Grid size={{ xs: 12 }}>
           <Paper elevation={0} className="summary-card">
             <Box className="pie-chart-wrapper">
@@ -257,7 +256,7 @@ const StockReport: React.FC<StockReportProps> = ({
           </Paper>
         </Grid>
 
-        {/* 아래쪽: 추가 및 리스트 */}
+        {/* 아래쪽: 보유 주식 리스트 */}
         <Grid
           size={{ xs: 12 }}
           sx={{
@@ -268,75 +267,13 @@ const StockReport: React.FC<StockReportProps> = ({
             minHeight: 0,
           }}
         >
-          <Box className="input-section">
-            <FormControl
-              size="small"
-              sx={{ minWidth: 200 }}
-              error={errors.ticker}
-            >
-              <InputLabel>종목 선택</InputLabel>
-              <Select
-                value={newTicker}
-                label="종목 선택"
-                onChange={(e) => {
-                  setNewTicker(e.target.value);
-                  setErrors((prev) => ({ ...prev, ticker: false }));
-                }}
-              >
-                {allTickers.map((t) => (
-                  <MenuItem key={t.ticker} value={t.ticker}>
-                    {t.tickerName}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              size="small"
-              label="매수가"
-              type="number"
-              value={newPrice}
-              sx={{ flex: 1 }}
-              error={errors.price}
-              helperText={errors.price ? "금액 확인" : ""}
-              onChange={(e) => {
-                const val = e.target.value === "" ? "" : Number(e.target.value);
-                setNewPrice(val);
-                if (val !== "" && val > 0)
-                  setErrors((prev) => ({ ...prev, price: false }));
-              }}
-            />
-            <TextField
-              size="small"
-              label="수량"
-              type="number"
-              value={newQty}
-              sx={{ flex: 1 }}
-              error={errors.qty}
-              helperText={errors.qty ? "수량 확인" : ""}
-              onChange={(e) => {
-                const val = e.target.value === "" ? "" : Number(e.target.value);
-                setNewQty(val);
-                if (val !== "" && val > 0)
-                  setErrors((prev) => ({ ...prev, qty: false }));
-              }}
-            />
-            <Button
-              variant="contained"
-              onClick={handleAddStock}
-              className="apple-button"
-              disableElevation
-            >
-              <AddIcon />
-            </Button>
-          </Box>
-
           <Box className="scroll-container space-y-3">
             {reportData.details.length === 0 && (
               <Typography className="text-center text-gray-400 py-10">
-                보유 주식을 추가해보세요.
+                보유 주식이 없습니다.
               </Typography>
             )}
-            {reportData.details.map((item, index) => (
+            {reportData.details.map((item) => (
               <Paper
                 key={item.ticker}
                 elevation={0}
@@ -384,15 +321,18 @@ const StockReport: React.FC<StockReportProps> = ({
                     {item.profitRate.toFixed(2)}%)
                   </Typography>
                 </Box>
-
-                <IconButton size="small" onClick={() => handleDelete(index)}>
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
               </Paper>
             ))}
           </Box>
         </Grid>
       </Grid>
+
+      {/* 거래 내역 모달 (히스토리 아이콘 클릭 시) */}
+      <HistoryModal
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        userId={userId ?? null}
+      />
     </Box>
   );
 };

@@ -8,6 +8,16 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
+/**
+ * 게스트 유저 엔티티 (MariaDB users 테이블 매핑)
+ *
+ * CREATE TABLE users (
+ *     user_id    VARCHAR(50)  NOT NULL,
+ *     balance    BIGINT(20)   NOT NULL DEFAULT 10000000,
+ *     created_at TIMESTAMP    NULL DEFAULT current_timestamp(),
+ *     PRIMARY KEY (user_id)
+ * ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ */
 @Entity
 @Table(name = "users")
 @Getter
@@ -16,9 +26,10 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 public class User {
     @Id
+    @Column(name = "user_id", nullable = false, length = 50)
     private String userId;
 
-    @Column(name = "balance")
+    @Column(name = "balance", nullable = false)
     private long balance;
 
     @Column(name = "created_at", updatable = false)
