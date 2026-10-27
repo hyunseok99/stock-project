@@ -30,11 +30,12 @@ def get_engine():
    
     engine = create_engine(
         MARIADB_URL, 
+        connect_args={"init_command": "SET time_zone='+09:00'"},
         pool_size=10, 
         max_overflow=20, 
         pool_recycle=3600
     )
-    return engine;
+    return engine
 
 def get_all_valid_tickers(engine) -> set:
     """[앱 시작 시 1회 실행] DB(livestock)에서 유효한 모든 주식 티커 목록을 가져옵니다."""
@@ -162,9 +163,27 @@ def bulk_insert_order_history(engine, records: list):
     batch_count = len(records)
     flush_start = time.time();
 
+    for r in records:
+        if not r.get("ordered_at"):
+            r["ordered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if not r.get("executed_at"):
+            r["executed_at"] = r["ordered_at"]
+        if "kafka_lag_ms" not in r:
+            r["kafka_lag_ms"] = 0
+        if "total_latency_ms" not in r:
+            r["total_latency_ms"] = 0
+        if "retry_count" not in r:
+            r["retry_count"] = 0
+
     sql = text("""
-        INSERT INTO order_history (user_id, ticker, amount, price, quantity, order_type, status, ordered_at)
-        VALUES (:user_id, :ticker, :amount, :price, :quantity, :order_type, :status, NOW())
+        INSERT IGNORE INTO order_history (
+            order_id, user_id, ticker, amount, price, quantity, order_type, status,
+            ordered_at, executed_at, kafka_lag_ms, total_latency_ms, retry_count
+        )
+        VALUES (
+            :order_id, :user_id, :ticker, :amount, :price, :quantity, :order_type, :status,
+            :ordered_at, :executed_at, :kafka_lag_ms, :total_latency_ms, :retry_count
+        )
     """)
 
     try:

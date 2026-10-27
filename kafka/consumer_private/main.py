@@ -1,11 +1,15 @@
 import os
 import time
 import socket
+import uuid
+from datetime import datetime, timezone, timedelta
 import metrics
 from sqlalchemy import text
 from private_kafka import create_consumer, create_producer
 from db_connection import get_engine, get_all_valid_tickers, get_user_balance_from_db, get_user_stock_quantity_from_db, is_flush_required, bulk_insert_order_history, sync_user_stock_after_fill
 from private_redis import create_redis_client, process_user_order
+
+KST = timezone(timedelta(hours=9))
 
 POD_NAME = socket.gethostname()
 VALID_TICKERS = set()
@@ -51,9 +55,15 @@ def main():
     last_flush_time = time.time()
 
     def process_flush():
-            """db_connection 모듈을 통해 DB 플러시 후, 성공 시 메트릭 기록 및 카프카 오프셋을 커밋합니다."""
-            nonlocal last_flush_time
-            
+        """db_connection 모듈을 통해 DB 플러시 후, 성공 시 메트릭 기록 및 카프카 오프셋을 커밋합니다."""
+        nonlocal last_flush_time
+        if not order_buffer:
+            return
+
+        max_retries = 3
+        delays = [0.5, 1.0, 2.0]
+
+        for attempt in range(max_retries):
             # DB 벌크 적재 실행
             success, duration, count = bulk_insert_order_history(engine, order_buffer)
             
@@ -66,8 +76,12 @@ def main():
                 consumer.commit()
                 order_buffer.clear()
                 last_flush_time = time.time()
-            else:
-                print("DB Bulk Insert 실패로 인해 카프카 오프셋 커밋을 보류합니다.")
+                return
+
+            print(f"⚠️ [DB 벌크 플러시 실패] 재시도 {attempt + 1}/{max_retries} ({delays[attempt]}초 대기)...")
+            time.sleep(delays[attempt])
+
+        print(f"🚨 [CRITICAL] DB Bulk Insert 3회 재시도 모두 실패! (버퍼 크기: {len(order_buffer)}) 카프카 오프셋 커밋을 보류합니다.")
     
 
     # 3. 카프카 이벤트 루프 가동 (non-blocking 폴링 구조로 변경)
@@ -82,11 +96,39 @@ def main():
                         assigned_partition = message.partition
 
                         order_dto = message.value
+                        order_id = order_dto.get('orderId')
                         user_id = order_dto.get('userId')
+                        
+                        # 🚨 [검증] orderId가 없는 비정상 메시지는 멱등성과 추적성을 위해 즉시 거절
+                        if not order_id:
+                            print(f"❌ [비정상 메시지] orderId가 누락되어 주문을 거절합니다: {order_dto}")
+                            metrics.ORDER_PROCESS_TOTAL.labels(order_type=order_dto.get('orderType') or "UNKNOWN", status="FAILED_MISSING_ORDER_ID").inc()
+                            
+                            # 유저 ID가 존재할 때만 프론트엔드로 실패 알림 발행 (스피너 무한 대기 방지)
+                            if user_id:
+                                fail_event = {
+                                    "orderId": None,
+                                    "userId": user_id,
+                                    "ticker": order_dto.get('ticker'),
+                                    "orderType": order_dto.get('orderType'),
+                                    "status": "FAILED",
+                                    "message": "주문 식별자(orderId)가 누락되어 주문 처리가 거절되었습니다.",
+                                    "processedPartition": assigned_partition
+                                }
+                                producer.send(completed_topic, value=fail_event)
+                            continue
+
                         ticker = order_dto.get('ticker')
                         order_type = order_dto.get('orderType')
                         price = int(order_dto.get('price', 0))
                         quantity = int(order_dto.get('quantity', 0))
+                        ordered_at = order_dto.get('orderedAt') or datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+                        now_ms = int(time.time() * 1000)
+                        requested_at_ms = int(order_dto.get('requestedAt') or now_ms)
+                        published_at_ms = int(order_dto.get('publishedAt') or requested_at_ms)
+                        polled_at_ms = now_ms
+                        kafka_lag_ms = max(0, polled_at_ms - published_at_ms)
                         
                         total_order_price = price * quantity
                         
@@ -98,6 +140,7 @@ def main():
                             metrics.ORDER_PROCESS_TOTAL.labels(order_type=order_type, status="FAILED_INVALID_TICKER").inc()
                             
                             fail_event = {
+                                "orderId": order_id,
                                 "userId": user_id, "ticker": ticker, "orderType": order_type,
                                 "status": "FAILED", "message": "존재하지 않는 주식 종목입니다.",
                                 "processedPartition": assigned_partition
@@ -156,6 +199,7 @@ def main():
 
                         # [알림 전송] 카프카 체결 완료/실패 이벤트 토픽 발행
                         completed_event = {
+                            "orderId": order_id,
                             "userId": user_id,
                             "ticker": ticker,
                             "orderType": order_type,
@@ -165,15 +209,25 @@ def main():
                         }
                         producer.send(completed_topic, value=completed_event)
 
+                        executed_at_ms = int(time.time() * 1000)
+                        executed_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+                        total_latency_ms = max(0, executed_at_ms - requested_at_ms)
+
                         # [WORK 4] DB 벌크 적재용 메모리 버퍼 적재
                         order_buffer.append({
+                            "order_id": order_id,
                             "user_id": user_id,
                             "ticker": ticker,
                             "amount": total_order_price,
                             "price": price,
                             "quantity": quantity,
                             "order_type": order_type,
-                            "status": status_str
+                            "status": status_str,
+                            "ordered_at": ordered_at,
+                            "executed_at": executed_at,
+                            "kafka_lag_ms": kafka_lag_ms,
+                            "total_latency_ms": total_latency_ms,
+                            "retry_count": 0
                         })
                             
                     except Exception as e:
