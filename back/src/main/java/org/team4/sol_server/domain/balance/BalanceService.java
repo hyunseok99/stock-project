@@ -18,11 +18,17 @@ public class BalanceService {
     private final BalanceRedisRepository balanceRedisRepository;
     private final UserService userService;
 
+    public static final long MAX_DEPOSIT_AMOUNT = 10_000_000_000L; // 1회 최대 100억 원
+
     /**
      * 입금 처리 (Redis 원자적 증가 -> Kafka 비동기 이벤트 발행)
      */
     public void deposit(BalanceApiRequest request) {
         validateAmount(request.getAmount());
+        if (request.getAmount() > MAX_DEPOSIT_AMOUNT) {
+            log.warn("[입금 거절 - 한도 초과] User: {}, 요청액: {}", request.getUserId(), request.getAmount());
+            throw new CustomException(BalanceErrorCode.EXCEED_MAX_DEPOSIT_AMOUNT);
+        }
 
         // 1. Redis 잔고 증가 (Key Miss 사전 검증 포함)
         Long newBalance = balanceRedisRepository.deposit(request.getUserId(), request.getAmount());

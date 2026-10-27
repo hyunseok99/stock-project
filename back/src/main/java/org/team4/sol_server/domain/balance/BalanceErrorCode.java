@@ -12,6 +12,7 @@ public enum BalanceErrorCode implements CustomErrorCode {
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "B001", "잔액이 부족합니다."),
     INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "B002", "입출금 금액은 0원보다 커야 합니다."),
     INVALID_TRANSACTION_TYPE(HttpStatus.BAD_REQUEST, "B003", "유효하지 않은 거래 유형(Type)입니다."),
+    EXCEED_MAX_DEPOSIT_AMOUNT(HttpStatus.BAD_REQUEST, "B008", "1회 최대 입금 금액은 100억 원입니다."),
 
     // 404 Not Found (대상 리소스 없음)
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "B004", "존재하지 않는 유저입니다."),

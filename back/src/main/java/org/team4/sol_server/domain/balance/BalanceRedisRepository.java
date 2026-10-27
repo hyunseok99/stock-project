@@ -22,12 +22,18 @@ public class BalanceRedisRepository {
         // 💡 Redis는 키가 없으면 자동으로 0을 생성하므로, 연산 전에 존재 여부 사전 검증
         validateUserKeyExists(userId, redisKey);
 
-        Long newBalance = redisTemplate.opsForValue().increment(redisKey, amount);
-        if (newBalance == null) {
+        try {
+            Long newBalance = redisTemplate.opsForValue().increment(redisKey, amount);
+            if (newBalance == null) {
+                throw new CustomException(BalanceErrorCode.REDIS_OPERATION_FAILED);
+            }
+            return newBalance;
+        } catch (CustomException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[Redis Deposit Error] increment 실패: User: {}, amount: {}", userId, amount, e);
             throw new CustomException(BalanceErrorCode.REDIS_OPERATION_FAILED);
         }
-
-        return newBalance;
     }
 
     /**
@@ -39,20 +45,27 @@ public class BalanceRedisRepository {
         // 💡 사전 존재 여부 검증
         validateUserKeyExists(userId, redisKey);
 
-        // Redis 동기 차감
-        Long remainingBalance = redisTemplate.opsForValue().decrement(redisKey, amount);
-        if (remainingBalance == null) {
+        try {
+            // Redis 동기 차감
+            Long remainingBalance = redisTemplate.opsForValue().decrement(redisKey, amount);
+            if (remainingBalance == null) {
+                throw new CustomException(BalanceErrorCode.REDIS_OPERATION_FAILED);
+            }
+
+            // 잔액 부족 시 동기 롤백 (원복)
+            if (remainingBalance < 0) {
+                redisTemplate.opsForValue().increment(redisKey, amount);
+                log.warn("[출금 거절 - 잔액 부족] User: {}, 요청액: {}", userId, amount);
+                throw new CustomException(BalanceErrorCode.INSUFFICIENT_BALANCE);
+            }
+
+            return remainingBalance;
+        } catch (CustomException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[Redis Withdraw Error] decrement 실패: User: {}, amount: {}", userId, amount, e);
             throw new CustomException(BalanceErrorCode.REDIS_OPERATION_FAILED);
         }
-
-        // 잔액 부족 시 동기 롤백 (원복)
-        if (remainingBalance < 0) {
-            redisTemplate.opsForValue().increment(redisKey, amount);
-            log.warn("[출금 거절 - 잔액 부족] User: {}, 요청액: {}", userId, amount);
-            throw new CustomException(BalanceErrorCode.INSUFFICIENT_BALANCE);
-        }
-
-        return remainingBalance;
     }
 
     /**
