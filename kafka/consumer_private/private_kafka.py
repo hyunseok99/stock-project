@@ -44,7 +44,7 @@ def create_consumer():
 def create_producer():
     broker = get_env_or_raise('KAFKA_BROKER')
     producer_topic = get_env_or_raise("KAFKA_COMPLETED_TOPIC")
-    retry_topic = os.environ.get("KAFKA_RETRY_TOPIC")
+    retry_topic = get_env_or_raise("KAFKA_RETRY_TOPIC")
     while True:
         try:
             producer = KafkaProducer(
