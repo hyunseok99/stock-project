@@ -46,6 +46,9 @@ public class OrderHistory {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "order_id", nullable = false, unique = true, length = 50)
+    private String orderId;
+
     @Column(name = "user_id", nullable = false, length = 50)
     private String userId;
 
@@ -69,4 +72,16 @@ public class OrderHistory {
 
     @Column(name = "ordered_at")
     private LocalDateTime orderedAt;
+
+    @Column(name = "executed_at")
+    private LocalDateTime executedAt;
+
+    @Column(name = "kafka_lag_ms")
+    private Integer kafkaLagMs;
+
+    @Column(name = "total_latency_ms")
+    private Integer totalLatencyMs;
+
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount;
 }

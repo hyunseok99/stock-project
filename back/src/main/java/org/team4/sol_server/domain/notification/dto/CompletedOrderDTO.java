@@ -14,6 +14,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class CompletedOrderDTO {
+    private String orderId;
     private String userId;
     private String ticker;
     private String status;
