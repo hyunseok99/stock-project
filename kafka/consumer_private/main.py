@@ -46,7 +46,7 @@ def main():
     
     # consumer, producer 생성 
     consumer = create_consumer()
-    completed_topic, producer = create_producer()
+    completed_topic, retry_topic, producer = create_producer()
 
     print("[Main] 모든 인프라 연결 완료. 주문 메시지 수신 대기 중...")
 
@@ -81,7 +81,17 @@ def main():
             print(f"⚠️ [DB 벌크 플러시 실패] 재시도 {attempt + 1}/{max_retries} ({delays[attempt]}초 대기)...")
             time.sleep(delays[attempt])
 
-        print(f"🚨 [CRITICAL] DB Bulk Insert 3회 재시도 모두 실패! (버퍼 크기: {len(order_buffer)}) 카프카 오프셋 커밋을 보류합니다.")
+        print(f"🚨 [CRITICAL] DB Bulk Insert 3회 재시도 모두 실패! (버퍼 크기: {len(order_buffer)})")
+        print(f"📦 [보상 로직 발동] 미적재 주문 {len(order_buffer)}건을 {retry_topic} 토픽으로 안전하게 격리 발행합니다.")
+
+        for failed_order in order_buffer:
+            failed_order["retry_count"] = failed_order.get("retry_count", 0) + 1
+            producer.send(retry_topic, value=failed_order)
+
+        # 💡 안전하게 토픽으로 위임 완료했으므로, 메인 오프셋을 커밋하고 버퍼를 비워 파이프라인 무한정체를 방지
+        consumer.commit()
+        order_buffer.clear()
+        last_flush_time = time.time()
     
 
     # 3. 카프카 이벤트 루프 가동 (non-blocking 폴링 구조로 변경)

@@ -40,10 +40,11 @@ def create_consumer():
             print(f"Unexpected error while connecting to Kafka: {e}. Retrying in 3 seconds...")
             time.sleep(3)
 
-# Kafka Producer 설정 (orders completed 처리용)
+# Kafka Producer 설정 (orders completed 및 retry 처리용)
 def create_producer():
     broker = get_env_or_raise('KAFKA_BROKER')
-    producer_topic = get_env_or_raise("KAFKA_COMPLETED_TOPIC") 
+    producer_topic = get_env_or_raise("KAFKA_COMPLETED_TOPIC")
+    retry_topic = os.environ.get("KAFKA_RETRY_TOPIC")
     while True:
         try:
             producer = KafkaProducer(
@@ -52,7 +53,7 @@ def create_producer():
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
             print("Successfully connected to Kafka Producer")
-            return producer_topic, producer
+            return producer_topic, retry_topic, producer
         except NoBrokersAvailable:
             print(f"Kafka broker ({broker}) is not available yet for Producer. Retrying in 3 seconds...")
             time.sleep(3)
