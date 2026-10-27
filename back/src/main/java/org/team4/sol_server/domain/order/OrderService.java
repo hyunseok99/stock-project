@@ -1,5 +1,7 @@
 package org.team4.sol_server.domain.order;
 
+import java.time.LocalDateTime;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.team4.sol_server.domain.order.dto.OrderRequestDTO;
@@ -26,6 +28,18 @@ public class OrderService {
             throw new CustomException(OrderErrorCode.INVALID_PRICE);
         }
 
-        kafkaOrderProducerService.sendOrderEvent(dto);
+        long now = System.currentTimeMillis();
+        String orderId = (dto.getOrderId() != null && !dto.getOrderId().isBlank())
+                ? dto.getOrderId()
+                : UUID.randomUUID().toString();
+
+        OrderRequestDTO eventDto = dto.toBuilder()
+                .orderId(orderId)
+                .orderedAt(dto.getOrderedAt() != null ? dto.getOrderedAt() : LocalDateTime.now())
+                .requestedAt(dto.getRequestedAt() != null ? dto.getRequestedAt() : now)
+                .publishedAt(now)
+                .build();
+
+        kafkaOrderProducerService.sendOrderEvent(eventDto);
     }
 }
