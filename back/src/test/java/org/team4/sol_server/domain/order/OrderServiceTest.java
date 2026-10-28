@@ -7,15 +7,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 import org.team4.sol_server.domain.order.dto.OrderRequestDTO;
+import org.team4.sol_server.error.CustomException;
 
-import java.time.Duration;
-
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -23,12 +19,6 @@ class OrderServiceTest {
 
     @Mock
     private KafkaOrderProducerService kafkaOrderProducerService;
-
-    @Mock
-    private StringRedisTemplate redisTemplate;
-
-    @Mock
-    private ValueOperations<String, String> valueOperations;
 
     @InjectMocks
     private OrderService orderService;
@@ -48,13 +38,8 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("신규 orderId 요청인 경우 카프카에 정상 발행한다")
-    void processOrder_firstTime_success() {
-        // given
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.setIfAbsent(eq("order:request:dedup:uuid-test-order-001"), eq("1"), any(Duration.class)))
-                .thenReturn(true);
-
+    @DisplayName("유효한 주문 요청인 경우 카프카에 정상 발행한다")
+    void processOrder_valid_success() {
         // when
         orderService.processOrder(validDto);
 
@@ -63,17 +48,24 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("이미 접수된 동일한 orderId 요청인 경우 카프카 중복 발행을 차단한다")
-    void processOrder_duplicate_blocked() {
-        // given
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.setIfAbsent(eq("order:request:dedup:uuid-test-order-001"), eq("1"), any(Duration.class)))
-                .thenReturn(false);
+    @DisplayName("수량이 0 이하인 경우 예외를 발생시킨다")
+    void processOrder_invalidQuantity_throwsException() {
+        OrderRequestDTO invalidDto = validDto.toBuilder().quantity(0).build();
 
-        // when
-        orderService.processOrder(validDto);
+        assertThatThrownBy(() -> orderService.processOrder(invalidDto))
+                .isInstanceOf(CustomException.class);
 
-        // then
-        verify(kafkaOrderProducerService, never()).sendOrderEvent(any(OrderRequestDTO.class));
+        verify(kafkaOrderProducerService, never()).sendOrderEvent(any());
+    }
+
+    @Test
+    @DisplayName("가격이 0 이하인 경우 예외를 발생시킨다")
+    void processOrder_invalidPrice_throwsException() {
+        OrderRequestDTO invalidDto = validDto.toBuilder().price(0L).build();
+
+        assertThatThrownBy(() -> orderService.processOrder(invalidDto))
+                .isInstanceOf(CustomException.class);
+
+        verify(kafkaOrderProducerService, never()).sendOrderEvent(any());
     }
 }

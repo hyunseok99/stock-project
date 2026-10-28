@@ -163,6 +163,18 @@ def main():
                             producer.send(completed_topic, value=fail_event)
                             continue
 
+                        # [WORK 0.5] 중복 주문(orderId) 멱등성 방어 (Redis SETNX, 1시간 TTL)
+                        # 카프카 재시도, 리밸런싱, 혹은 클라이언트 중복 전송으로 동일한 orderId가 유입된 경우 중복 체결(잔고 이중 차감) 차단
+                        try:
+                            dedup_key = f"order:processed:{order_id}"
+                            is_new_order = redis_client.set(dedup_key, "1", nx=True, ex=3600)
+                            if not is_new_order:
+                                print(f"⚠️ [중복 주문 감지] 이미 처리 중이거나 체결 완료된 orderId 입니다. 중복 체결 스킵: {order_id}")
+                                metrics.ORDER_PROCESS_TOTAL.labels(order_type=order_type or "UNKNOWN", status="SKIPPED_DUPLICATE").inc()
+                                continue
+                        except Exception as e:
+                            print(f"⚠️ [Redis 멱등성 검증 오류] {e} (주문 계속 진행)")
+
                         # [WORK 1] Redis 루아 스크립트로 1ms 실시간 체결 연산 실행
                         res_balance = process_user_order(redis_client, user_id, ticker, total_order_price, order_type, quantity)
 
