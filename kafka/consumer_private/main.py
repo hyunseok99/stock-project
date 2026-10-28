@@ -2,6 +2,9 @@ import os
 import time
 import socket
 import uuid
+import signal
+import threading
+from queue import Queue, Empty
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 import metrics
@@ -54,49 +57,67 @@ def main():
 
     print("[Main] 모든 인프라 연결 완료. 주문 메시지 수신 대기 중...")
 
-    # DB 벌크 버퍼 및 플러시 타이머 초기화
+    # 5. DB 벌크 적재 전용 백그라운드 큐 및 워커 스레드 (메인 이벤트 루프 블로킹 완전 제거)
     order_buffer = []
     last_flush_time = time.time()
+    db_flush_queue = Queue(maxsize=200)
+    stop_event = threading.Event()
 
-    def process_flush():
-        """db_connection 모듈을 통해 DB 플러시 후, 성공 시 메트릭 기록 및 카프카 오프셋을 커밋합니다."""
+    def db_flush_worker():
+        """백그라운드에서 메모리 큐로부터 배치 데이터를 꺼내 MariaDB로 비동기 벌크 적재합니다."""
+        while not stop_event.is_set() or not db_flush_queue.empty():
+            try:
+                batch = db_flush_queue.get(timeout=1.0)
+            except Empty:
+                continue
+
+            max_retries = 3
+            delays = [0.5, 1.0, 2.0]
+            success = False
+
+            for attempt in range(max_retries):
+                success, duration, count = bulk_insert_order_history(engine, batch)
+                if success:
+                    if count > 0:
+                        metrics.DB_FLUSH_LATENCY.observe(duration)
+                        metrics.DB_BATCH_SIZE.observe(count)
+                    break
+
+                print(f"⚠️ [DB 벌크 플러시 실패] 재시도 {attempt + 1}/{max_retries} ({delays[attempt]}초 대기)...")
+                time.sleep(delays[attempt])
+
+            if not success:
+                print(f"🚨 [CRITICAL] DB Bulk Insert 3회 재시도 모두 실패! (버퍼 크기: {len(batch)})")
+                print(f"📦 [보상 로직 발동] 미적재 주문 {len(batch)}건을 {retry_topic} 토픽으로 안전하게 격리 발행합니다.")
+                for failed_order in batch:
+                    failed_order["retry_count"] = failed_order.get("retry_count", 0) + 1
+                    producer.send(retry_topic, value=failed_order)
+
+            db_flush_queue.task_done()
+
+    # DB 벌크 전용 백그라운드 스레드 가동
+    flush_thread = threading.Thread(target=db_flush_worker, name="DbBulkFlushWorker", daemon=True)
+    flush_thread.start()
+
+    def dispatch_flush():
+        """메인 이벤트 루프 블로킹 없이, 메모리 버퍼를 백그라운드 DB 플러시 큐로 즉시 전달합니다."""
         nonlocal last_flush_time
         if not order_buffer:
             return
 
-        max_retries = 3
-        delays = [0.5, 1.0, 2.0]
-
-        for attempt in range(max_retries):
-            # DB 벌크 적재 실행
-            success, duration, count = bulk_insert_order_history(engine, order_buffer)
-            
-            if success:
-                if count > 0:
-                    metrics.DB_FLUSH_LATENCY.observe(duration)
-                    metrics.DB_BATCH_SIZE.observe(count)
-                
-                # DB 저장 완료 직후 카프카 오프셋 커밋 및 버퍼 비우기
-                consumer.commit()
-                order_buffer.clear()
-                last_flush_time = time.time()
-                return
-
-            print(f"⚠️ [DB 벌크 플러시 실패] 재시도 {attempt + 1}/{max_retries} ({delays[attempt]}초 대기)...")
-            time.sleep(delays[attempt])
-
-        print(f"🚨 [CRITICAL] DB Bulk Insert 3회 재시도 모두 실패! (버퍼 크기: {len(order_buffer)})")
-        print(f"📦 [보상 로직 발동] 미적재 주문 {len(order_buffer)}건을 {retry_topic} 토픽으로 안전하게 격리 발행합니다.")
-
-        for failed_order in order_buffer:
-            failed_order["retry_count"] = failed_order.get("retry_count", 0) + 1
-            producer.send(retry_topic, value=failed_order)
-
-        # 💡 안전하게 토픽으로 위임 완료했으므로, 메인 오프셋을 커밋하고 버퍼를 비워 파이프라인 무한정체를 방지
-        consumer.commit()
+        batch_to_flush = list(order_buffer)
         order_buffer.clear()
         last_flush_time = time.time()
+
+        # 백그라운드 큐로 비동기 전달 (0.0001초 미만 소요)
+        db_flush_queue.put(batch_to_flush)
     
+
+    # SIGTERM 수신 시 안전하게 KeyboardInterrupt로 전환하여 finally 블록 실행
+    def handle_sigterm(signum, frame):
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
 
     # 3. 카프카 이벤트 루프 가동 (non-blocking 폴링 구조로 변경)
     try:
@@ -268,17 +289,21 @@ def main():
 
             # [WORK 5] 배치 플러시 조건 검사 (버퍼에 데이터가 있을 때만 500개 누적 OR 5초 경과 체크)
             if order_buffer and is_flush_required(len(order_buffer), last_flush_time):
-                process_flush()
+                dispatch_flush()
 
     except KeyboardInterrupt:
-        print("🛑 프로세스 정지 요청 감지 - 메모리 버퍼 잔여 데이터 DB 플러시 중...")
+        print("🛑 프로세스 정지 요청 감지 - 메모리 버퍼 잔여 데이터 DB 플러시 큐 전달 중...")
         if order_buffer:
-            process_flush()
+            dispatch_flush()
     finally:
-        # 종료 시 스레드 풀 및 커넥션 자원 정리
-        stock_sync_executor.shutdown(wait=False)
+        # 종료 시 잔여 큐 데이터가 모두 DB에 적재될 때까지 안전하게 대기
+        print("[Shutdown] 잔여 DB 벌크 큐 적재 완료 대기 중...")
+        stop_event.set()
+        flush_thread.join(timeout=10)
+        stock_sync_executor.shutdown(wait=True)
         consumer.close()
         producer.close()
+        print("[Shutdown] 시스템 자원 정리 완료.")
 
 
 if __name__ == "__main__":
