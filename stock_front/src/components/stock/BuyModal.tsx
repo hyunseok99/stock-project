@@ -52,6 +52,7 @@ const BuyModal: React.FC<BuyModalProps> = ({
     setLoading(true);
     try {
       await createOrder({
+        orderId: crypto.randomUUID(),
         userId,
         ticker: stock.ticker,
         orderType: "BUY",

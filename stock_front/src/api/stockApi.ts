@@ -220,6 +220,18 @@ export interface TradeHistoryItem {
   status?: string | null;
   /** ISO-8601 시각 */
   timestamp?: string | null;
+  /** 주문 고유 ID (입출금은 null) */
+  orderId?: string | null;
+  /** 주문 접수 시각 */
+  orderedAt?: string | null;
+  /** 체결 완료 시각 */
+  executedAt?: string | null;
+  /** 카프카 브로커 지연 시간 (ms) */
+  kafkaLagMs?: number | null;
+  /** 전체 처리 소요 시간 (ms) */
+  totalLatencyMs?: number | null;
+  /** DB 재시도 횟수 */
+  retryCount?: number | null;
 }
 
 /**

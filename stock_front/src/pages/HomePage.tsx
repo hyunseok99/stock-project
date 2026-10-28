@@ -54,6 +54,11 @@ const HomePage: React.FC = () => {
     severity: "success" | "error" | "info";
   } | null>(null);
 
+  // 시세 재생(Replay) 상태 - Test 버튼으로 Kafka 수집분을 프론트로 스트리밍
+  const [replaying, setReplaying] = useState(false);
+  const [replayCount, setReplayCount] = useState(0);
+  const replaySourceRef = useRef<EventSource | null>(null);
+
   // 게스트 초기화 (DB + Redis 초기 잔고 워밍) - 1회
   const initUserDone = useRef(false);
 
@@ -119,6 +124,27 @@ const HomePage: React.FC = () => {
 
     return () => clearTimeout(retryTimer);
   }, [lastNotification, refetchPortfolio, refetchBalance]);
+
+  // 화면 복귀(노트북 덮개 열기 / 탭 활성화 / 네트워크 복구) 시 잔액/포트폴리오 백그라운드 재조회
+  useEffect(() => {
+    const handleRevalidate = () => {
+      if (document.visibilityState === "visible") {
+        console.log("[HomePage Recovery] Screen active -> Revalidating balance and portfolio");
+        refetchBalance();
+        refetchPortfolio();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleRevalidate);
+    window.addEventListener("focus", handleRevalidate);
+    window.addEventListener("online", handleRevalidate);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleRevalidate);
+      window.removeEventListener("focus", handleRevalidate);
+      window.removeEventListener("online", handleRevalidate);
+    };
+  }, [refetchBalance, refetchPortfolio]);
 
   // Initial data load + guest init
   useEffect(() => {
@@ -429,6 +455,142 @@ const HomePage: React.FC = () => {
     setSelectedStock(stock);
   }, []);
 
+  // 시세 재생(Replay) 시작 - Kafka 수집분을 SSE로 받아 stockData를 실시간 갱신
+  const startReplay = useCallback(() => {
+    if (replaying) return;
+    setReplaying(true);
+    setReplayCount(0);
+
+    const rawBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+    const source = new EventSource(`${rawBase}/api/market/replay?interval=30`);
+    replaySourceRef.current = source;
+
+    source.addEventListener("replay_batch", (ev: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(ev.data) as {
+          ticker: string;
+          date?: string;
+          price?: string | number;
+          endPrice?: string | number;
+          diff?: string | number;
+          diffRate?: string | number;
+          startPrice?: string | number;
+          highPrice?: string | number;
+          lowPrice?: string | number;
+          volume?: string | number;
+        }[];
+        if (!Array.isArray(parsed) || parsed.length === 0) return;
+        setReplayCount((c) => c + parsed.length);
+
+        // 1. 오른쪽 리스트 (stockData) 업데이트 및 상승/하락 하이라이트 애니메이션
+        setStockData((prev) => {
+          const updatedStocks = [...prev];
+          for (const item of parsed) {
+            if (!item.ticker) continue;
+            const index = updatedStocks.findIndex((s) => s.ticker === item.ticker);
+            if (index === -1) continue;
+
+            const current = updatedStocks[index];
+            const rawPrice = item.price ?? item.endPrice;
+            const newPrice = rawPrice !== undefined ? Number(rawPrice) : current.endPrice;
+            const diff = item.diff !== undefined ? Number(item.diff) : current.diff;
+            const diffRate = item.diffRate !== undefined ? Number(item.diffRate) : current.diffRate;
+            const highPrice = item.highPrice !== undefined ? Number(item.highPrice) : current.highPrice;
+            const lowPrice = item.lowPrice !== undefined ? Number(item.lowPrice) : current.lowPrice;
+            const startPrice = item.startPrice !== undefined ? Number(item.startPrice) : current.startPrice;
+            const volume = item.volume !== undefined ? Number(item.volume) : current.volume;
+            const date = item.date || current.date;
+
+            let animationClass = "";
+            if (current.endPrice !== 0 && !isNaN(newPrice)) {
+              if (newPrice > current.endPrice) animationClass = "highlight-up";
+              else if (newPrice < current.endPrice) animationClass = "highlight-down";
+            }
+
+            updatedStocks[index] = {
+              ...current,
+              endPrice: isNaN(newPrice) ? current.endPrice : newPrice,
+              diff,
+              diffRate,
+              highPrice,
+              lowPrice,
+              startPrice,
+              volume,
+              date,
+              highlightAnimation: animationClass || current.highlightAnimation,
+            };
+          }
+          return updatedStocks;
+        });
+
+        // 800ms 후 하이라이트 애니메이션 제거
+        setTimeout(() => {
+          setStockData((prev) => {
+            const updatedStocks = [...prev];
+            for (const item of parsed) {
+              const idx = updatedStocks.findIndex((s) => s.ticker === item.ticker);
+              if (idx !== -1 && updatedStocks[idx].highlightAnimation) {
+                updatedStocks[idx] = {
+                  ...updatedStocks[idx],
+                  highlightAnimation: "",
+                };
+              }
+            }
+            return updatedStocks;
+          });
+        }, 800);
+
+        // 2. 현재 선택된 종목(selectedStock) 업데이트 -> 중앙 실시간 차트(StockChart) 및 상단 정보 반영
+        setSelectedStock((prev) => {
+          if (!prev) return null;
+          const found = [...parsed].reverse().find((s) => s.ticker === prev.ticker);
+          if (!found) return prev;
+
+          const rawPrice = found.price ?? found.endPrice;
+          const newPrice = rawPrice !== undefined ? Number(rawPrice) : prev.endPrice;
+          return {
+            ...prev,
+            endPrice: isNaN(newPrice) ? prev.endPrice : newPrice,
+            diff: found.diff !== undefined ? Number(found.diff) : prev.diff,
+            diffRate: found.diffRate !== undefined ? Number(found.diffRate) : prev.diffRate,
+            highPrice: found.highPrice !== undefined ? Number(found.highPrice) : prev.highPrice,
+            lowPrice: found.lowPrice !== undefined ? Number(found.lowPrice) : prev.lowPrice,
+            startPrice: found.startPrice !== undefined ? Number(found.startPrice) : prev.startPrice,
+            volume: found.volume !== undefined ? Number(found.volume) : prev.volume,
+            date: found.date || prev.date,
+          };
+        });
+      } catch (e) {
+        console.error("[Replay] batch parse error:", e);
+      }
+    });
+
+    source.addEventListener("replay_complete", () => {
+      source.close();
+      replaySourceRef.current = null;
+      setReplaying(false);
+      setSnackbar({ severity: "info", message: "시세 재생이 완료되었습니다." });
+    });
+
+    source.onerror = () => {
+      source.close();
+      replaySourceRef.current = null;
+      setReplaying(false);
+      console.warn("[Replay] SSE 연결 종료");
+    };
+  }, [replaying]);
+
+  // 시세 재생 정지
+  const stopReplay = useCallback(() => {
+    replaySourceRef.current?.close();
+    replaySourceRef.current = null;
+    setReplaying(false);
+    setSnackbar({ severity: "info", message: "시세 재생을 중단했습니다." });
+  }, []);
+
+  // unmount 시 정리
+  useEffect(() => () => replaySourceRef.current?.close(), []);
+
   return (
     <Box className="home-page-container">
       <Container maxWidth="xl">
@@ -487,6 +649,23 @@ const HomePage: React.FC = () => {
                 {marketStatus.message}
               </Typography>
             </Box>
+
+            {/* 시세 재생(Replay) Test 버튼 */}
+            <Button
+              variant="contained"
+              color={replaying ? "error" : "primary"}
+              onClick={replaying ? stopReplay : startReplay}
+              sx={{
+                whiteSpace: "nowrap",
+                height: "48px",
+                borderRadius: "14px",
+                fontWeight: 700,
+                px: 3,
+              }}
+              title={replaying ? `재생 중... (${replayCount}건)` : "시세 재생 시작"}
+            >
+              {replaying ? `재생 중... (${replayCount})` : "Test"}
+            </Button>
           </Box>
         </Box>
 

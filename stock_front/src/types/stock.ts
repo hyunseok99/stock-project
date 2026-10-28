@@ -52,6 +52,7 @@ export interface DepositRequest {
 }
 
 export interface OrderRequest {
+  orderId?: string;
   userId: string;
   ticker: string;
   orderType: "BUY" | "SELL";
@@ -60,10 +61,15 @@ export interface OrderRequest {
 }
 
 export interface OrderNotification {
+  orderId?: string;
   userId: string;
   ticker: string;
   orderType?: string;
   status: string; // "SUCCESS" | "FAILED" ...
   message: string;
   processedPartition?: number | null;
+  orderedAt?: string;
+  executedAt?: string;
+  kafkaLagMs?: number | null;
+  totalLatencyMs?: number | null;
 }

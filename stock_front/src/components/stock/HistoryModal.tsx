@@ -3,6 +3,7 @@ import {
   Box,
   Chip,
   CircularProgress,
+  Collapse,
   Modal,
   Typography,
 } from "@mui/material";
@@ -42,7 +43,7 @@ const formatDateTime = (iso?: string | null): string => {
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
       d.getDate(),
-    )} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    )} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   } catch {
     return iso;
   }
@@ -58,8 +59,8 @@ const statusChipColor = (
 };
 
 const STATUS_LABEL: Record<string, string> = {
+  SUCCESS: "체결 완료",
   COMPLETED: "완료",
-  SUCCESS: "체결",
   FAIL: "실패",
   FAILED: "실패",
   PENDING: "대기",
@@ -72,6 +73,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
 }) => {
   const [histories, setHistories] = useState<TradeHistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !userId) return;
@@ -98,8 +100,8 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
           top: "50%",
           left: "50%",
           transform: "translate(-50%, -50%)",
-          width: 480,
-          maxHeight: "70vh",
+          width: 500,
+          maxHeight: "75vh",
           bgcolor: "background.paper",
           borderRadius: 2,
           boxShadow: 24,
@@ -121,67 +123,162 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
             거래 내역이 없습니다.
           </Typography>
         ) : (
-          <Box sx={{ overflowY: "auto", flex: 1 }}>
+          <Box sx={{ overflowY: "auto", flex: 1, pr: 0.5 }}>
             {histories.map((h) => {
               const positive = isPositiveAmount(h.type);
+              const itemKey = `${h.source}-${h.id}`;
+              const isExpanded = expandedId === itemKey;
+              const isOrder = h.source === "ORDER";
+
               return (
                 <Box
-                  key={`${h.source}-${h.id}`}
+                  key={itemKey}
                   sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 1.5,
                     py: 1.25,
                     borderBottom: "1px solid #f2f4f6",
+                    transition: "background-color 0.15s ease",
+                    cursor: isOrder ? "pointer" : "default",
+                    "&:hover": isOrder ? { bgcolor: "#fbfbfc" } : undefined,
+                    borderRadius: 1,
+                    px: 1,
+                  }}
+                  onClick={() => {
+                    if (isOrder) {
+                      setExpandedId(isExpanded ? null : itemKey);
+                    }
                   }}
                 >
-                  {/* 좌측: 타입 칩 + 설명 */}
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Box sx={{ display: "flex", gap: 0.75, alignItems: "center" }}>
-                      <Chip
-                        size="small"
-                        label={TYPE_LABEL[h.type] ?? h.type}
-                        color={TYPE_COLOR[h.type] ?? "default"}
-                        sx={{ height: 22, fontSize: 12, fontWeight: 700 }}
-                      />
-                      {h.source === "ORDER" && h.status && (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                    {/* 좌측: 타입 칩 + 설명 */}
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: "flex", gap: 0.75, alignItems: "center" }}>
                         <Chip
                           size="small"
-                          variant="outlined"
-                          label={STATUS_LABEL[h.status] ?? h.status}
-                          color={statusChipColor(h.status)}
-                          sx={{ height: 22, fontSize: 11 }}
+                          label={TYPE_LABEL[h.type] ?? h.type}
+                          color={TYPE_COLOR[h.type] ?? "default"}
+                          sx={{ height: 22, fontSize: 12, fontWeight: 700 }}
                         />
-                      )}
+                        {isOrder && h.status && (
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            label={STATUS_LABEL[h.status] ?? h.status}
+                            color={statusChipColor(h.status)}
+                            sx={{ height: 22, fontSize: 11 }}
+                          />
+                        )}
+                        {isOrder && (
+                          <Typography variant="caption" sx={{ color: "text.disabled", fontSize: 10 }}>
+                            {isExpanded ? "▲ 접기" : "▼ 상세"}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Typography
+                        variant="caption"
+                        color="textSecondary"
+                        noWrap
+                        display="block"
+                        sx={{ mt: 0.3 }}
+                      >
+                        {h.ticker
+                          ? `${h.ticker} · ${h.quantity ?? 0}주 @ ${(
+                              h.price ?? 0
+                            ).toLocaleString()}원`
+                          : formatDateTime(h.timestamp)}
+                      </Typography>
                     </Box>
-                    <Typography
-                      variant="caption"
-                      color="textSecondary"
-                      noWrap
-                      display="block"
-                    >
-                      {h.ticker
-                        ? `${h.ticker} · ${h.quantity ?? 0}주 @ ${(
-                            h.price ?? 0
-                          ).toLocaleString()}원`
-                        : formatDateTime(h.timestamp)}
-                    </Typography>
+
+                    {/* 우측: 금액 + 시각 */}
+                    <Box sx={{ textAlign: "right" }}>
+                      <Typography
+                        className={`font-bold ${
+                          positive ? "text-positive" : "text-negative"
+                        }`}
+                      >
+                        {positive ? "+" : "-"}
+                        {h.amount.toLocaleString()}원
+                      </Typography>
+                      <Typography variant="caption" color="textSecondary">
+                        {formatDateTime(h.timestamp)}
+                      </Typography>
+                    </Box>
                   </Box>
 
-                  {/* 우측: 금액 + 시각 */}
-                  <Box sx={{ textAlign: "right" }}>
-                    <Typography
-                      className={`font-bold ${
-                        positive ? "text-positive" : "text-negative"
-                      }`}
-                    >
-                      {positive ? "+" : "-"}
-                      {h.amount.toLocaleString()}원
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {formatDateTime(h.timestamp)}
-                    </Typography>
-                  </Box>
+                  {/* 주문 상세 소요 시간 및 메트릭 확장 패널 */}
+                  {isOrder && (
+                    <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                      <Box
+                        sx={{
+                          mt: 1.2,
+                          p: 1.5,
+                          bgcolor: "#f8f9fa",
+                          borderRadius: 1.5,
+                          fontSize: 12,
+                          color: "#495057",
+                          border: "1px solid #e9ecef",
+                        }}
+                      >
+                        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                          <Typography variant="caption" color="textSecondary">
+                            주문 번호:
+                          </Typography>
+                          <Typography variant="caption" sx={{ fontFamily: "monospace", fontWeight: 600 }}>
+                            {h.orderId ?? "-"}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                          <Typography variant="caption" color="textSecondary">
+                            주문 접수 일시:
+                          </Typography>
+                          <Typography variant="caption">
+                            {formatDateTime(h.orderedAt ?? h.timestamp)}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                          <Typography variant="caption" color="textSecondary">
+                            체결 완료 일시:
+                          </Typography>
+                          <Typography variant="caption">
+                            {formatDateTime(h.executedAt)}
+                          </Typography>
+                        </Box>
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            pt: 0.75,
+                            mt: 0.5,
+                            borderTop: "1px dashed #dee2e6",
+                          }}
+                        >
+                          <Box>
+                            <Typography variant="caption" color="textSecondary" display="block">
+                              카프카 대기 지연 (Lag)
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: "#495057" }}>
+                              {h.kafkaLagMs != null ? `${h.kafkaLagMs} ms` : "-"}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ textAlign: "right" }}>
+                            <Typography variant="caption" color="textSecondary" display="block">
+                              전체 체결 소요 시간 (E2E)
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: "#1976d2" }}>
+                              {h.totalLatencyMs != null ? `${h.totalLatencyMs} ms` : "-"}
+                            </Typography>
+                          </Box>
+                        </Box>
+                        {h.retryCount != null && h.retryCount > 0 && (
+                          <Typography
+                            variant="caption"
+                            sx={{ display: "block", color: "error.main", mt: 0.75, fontWeight: 600 }}
+                          >
+                            ⚠️ DB 장애 격리 후 보상 적재 완료 (재시도: {h.retryCount}회)
+                          </Typography>
+                        )}
+                      </Box>
+                    </Collapse>
+                  )}
                 </Box>
               );
             })}
