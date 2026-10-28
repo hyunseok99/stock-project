@@ -2,6 +2,7 @@ import os
 import time
 import socket
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 import metrics
 from sqlalchemy import text
@@ -47,6 +48,9 @@ def main():
     # consumer, producer 생성 
     consumer = create_consumer()
     completed_topic, retry_topic, producer = create_producer()
+
+    # 4. user_stocks 실시간 동기화를 위한 백그라운드 비동기 스레드 풀 (메인 이벤트 루프 블로킹 방지)
+    stock_sync_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="StockSyncWorker")
 
     print("[Main] 모든 인프라 연결 완료. 주문 메시지 수신 대기 중...")
 
@@ -215,14 +219,11 @@ def main():
                         
                         metrics.ORDER_PROCESS_TOTAL.labels(order_type=order_type, status=status_str).inc()
 
-                        # [WORK 3.5] 체결 성공 시 user_stocks 즉시 반영 (실시간 포지션 동기화)
-                        # - SSE 알림 발행보다 '먼저' 실행되어야 프론트가 알림 수신 후
-                        #   /api/portfolio 재조회할 때 최신 보유분을 받을 수 있음
-                        # - 본 함수 실패 시 settlement cronjob이 자정에 보정하므로 체결 처리는 계속 진행
+                        # [WORK 3.5] 체결 성공 시 user_stocks 백그라운드 비동기 반영 (실시간 포지션 동기화)
+                        # - 메인 이벤트 루프를 블로킹하지 않고 백그라운드 스레드에서 즉시 DB 반영 (Throughput 극대화)
+                        # - 본 작업 지연/실패 시에도 자정 settlement cronjob이 최종 보정
                         if res_balance >= 0:
-                            synced = sync_user_stock_after_fill(engine, user_id, ticker, price, quantity, order_type)
-                            if not synced:
-                                print(f"⚠️ [동기화 지연] 자정 settlement가 보정 예정 - User: {user_id}, Ticker: {ticker}")
+                            stock_sync_executor.submit(sync_user_stock_after_fill, engine, user_id, ticker, price, quantity, order_type)
 
                         executed_at_ms = int(time.time() * 1000)
                         executed_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
@@ -274,7 +275,8 @@ def main():
         if order_buffer:
             process_flush()
     finally:
-        # 종료 시 커넥션 자원 정리
+        # 종료 시 스레드 풀 및 커넥션 자원 정리
+        stock_sync_executor.shutdown(wait=False)
         consumer.close()
         producer.close()
 
