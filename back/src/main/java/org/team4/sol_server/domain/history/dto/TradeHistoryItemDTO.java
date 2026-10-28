@@ -39,4 +39,22 @@ public class TradeHistoryItemDTO {
 
     /** 발생 시각 (ISO-8601) */
     private String timestamp;
+
+    /** 주문 고유 ID (입출금은 null) */
+    private String orderId;
+
+    /** 주문 접수 시각 (ISO-8601) */
+    private String orderedAt;
+
+    /** 체결 완료 시각 (ISO-8601) */
+    private String executedAt;
+
+    /** 카프카 브로커 지연 시간 (ms) */
+    private Integer kafkaLagMs;
+
+    /** 전체 처리 소요 시간 (ms) */
+    private Integer totalLatencyMs;
+
+    /** DB 재시도 횟수 */
+    private Integer retryCount;
 }

@@ -65,6 +65,12 @@ public class HistoryService {
                     .amount(order.getAmount())
                     .status(order.getStatus())
                     .timestamp(order.getOrderedAt() != null ? order.getOrderedAt().format(TS_FORMATTER) : null)
+                    .orderId(order.getOrderId())
+                    .orderedAt(order.getOrderedAt() != null ? order.getOrderedAt().format(TS_FORMATTER) : null)
+                    .executedAt(order.getExecutedAt() != null ? order.getExecutedAt().format(TS_FORMATTER) : null)
+                    .kafkaLagMs(order.getKafkaLagMs())
+                    .totalLatencyMs(order.getTotalLatencyMs())
+                    .retryCount(order.getRetryCount())
                     .build());
         }
 

@@ -149,11 +149,16 @@ def main():
                             print(f"❌ [잘못된 티커] 존재하지 않는 종목: {ticker}")
                             metrics.ORDER_PROCESS_TOTAL.labels(order_type=order_type, status="FAILED_INVALID_TICKER").inc()
                             
+                            now_fail_ms = int(time.time() * 1000)
                             fail_event = {
                                 "orderId": order_id,
                                 "userId": user_id, "ticker": ticker, "orderType": order_type,
                                 "status": "FAILED", "message": "존재하지 않는 주식 종목입니다.",
-                                "processedPartition": assigned_partition
+                                "processedPartition": assigned_partition,
+                                "orderedAt": ordered_at,
+                                "executedAt": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                                "kafkaLagMs": kafka_lag_ms,
+                                "totalLatencyMs": max(0, now_fail_ms - requested_at_ms)
                             }
                             producer.send(completed_topic, value=fail_event)
                             continue
@@ -207,6 +212,10 @@ def main():
                             if not synced:
                                 print(f"⚠️ [동기화 지연] 자정 settlement가 보정 예정 - User: {user_id}, Ticker: {ticker}")
 
+                        executed_at_ms = int(time.time() * 1000)
+                        executed_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+                        total_latency_ms = max(0, executed_at_ms - requested_at_ms)
+
                         # [알림 전송] 카프카 체결 완료/실패 이벤트 토픽 발행
                         completed_event = {
                             "orderId": order_id,
@@ -215,13 +224,13 @@ def main():
                             "orderType": order_type,
                             "status": "SUCCESS" if res_balance >= 0 else "FAILED",
                             "message": msg,
-                            "processedPartition": assigned_partition
+                            "processedPartition": assigned_partition,
+                            "orderedAt": ordered_at,
+                            "executedAt": executed_at,
+                            "kafkaLagMs": kafka_lag_ms,
+                            "totalLatencyMs": total_latency_ms
                         }
                         producer.send(completed_topic, value=completed_event)
-
-                        executed_at_ms = int(time.time() * 1000)
-                        executed_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
-                        total_latency_ms = max(0, executed_at_ms - requested_at_ms)
 
                         # [WORK 4] DB 벌크 적재용 메모리 버퍼 적재
                         order_buffer.append({
