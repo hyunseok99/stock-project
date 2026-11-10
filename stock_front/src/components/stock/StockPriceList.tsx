@@ -152,13 +152,13 @@ const StockPriceList: React.FC<StockPriceListProps> = ({
 
                     <div className="stock-price-list-stock-price-container">
                       <div className="stock-price-list-stock-price">
-                        {stock.endPrice.toLocaleString()}원
+                        {Number(stock.endPrice).toLocaleString()}원
                       </div>
                       <div
-                        className={`stock-price-list-stock-diff ${stock.diff > 0 ? "text-positive" : stock.diff < 0 ? "text-negative" : ""}`}
+                        className={`stock-price-list-stock-diff ${Number(stock.diff) > 0 ? "text-positive" : Number(stock.diff) < 0 ? "text-negative" : ""}`}
                       >
-                        {stock.diff > 0 ? "▲" : stock.diff < 0 ? "▼" : ""}{" "}
-                        {Math.abs(stock.diff).toLocaleString()} (
+                        {Number(stock.diff) > 0 ? "▲" : Number(stock.diff) < 0 ? "▼" : ""}{" "}
+                        {Math.abs(Number(stock.diff)).toLocaleString()} (
                         {stock.diffRate}%)
                       </div>
                     </div>

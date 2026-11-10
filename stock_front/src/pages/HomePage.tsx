@@ -32,8 +32,56 @@ import "./HomePage.css";
 
 const PAGE_SIZE = 10;
 
+const mergeStockWithSnapshot = (
+  stock: Stock,
+  live: StockPriceUpdate,
+): Stock => {
+  const rawPrice = (live as any).price ?? live.endPrice;
+  const parsedPrice =
+    rawPrice !== undefined && rawPrice !== null && rawPrice !== ""
+      ? Number(rawPrice)
+      : NaN;
+  const parsedDiff =
+    live.diff !== undefined && live.diff !== null && (live.diff as any) !== ""
+      ? Number(live.diff)
+      : NaN;
+  const parsedDiffRate =
+    live.diffRate !== undefined &&
+    live.diffRate !== null &&
+    (live.diffRate as any) !== ""
+      ? Number(live.diffRate)
+      : NaN;
+  const parsedHigh = live.highPrice ? Number(live.highPrice) : NaN;
+  const parsedLow = live.lowPrice ? Number(live.lowPrice) : NaN;
+  const parsedStart = (live as any).startPrice
+    ? Number((live as any).startPrice)
+    : NaN;
+  const parsedVolume =
+    (live as any).volume !== undefined &&
+    (live as any).volume !== null &&
+    (live as any).volume !== ""
+      ? Number((live as any).volume)
+      : NaN;
+
+  return {
+    ...stock,
+    endPrice:
+      !isNaN(parsedPrice) && parsedPrice > 0 ? parsedPrice : stock.endPrice,
+    diff: !isNaN(parsedDiff) ? parsedDiff : stock.diff,
+    diffRate: !isNaN(parsedDiffRate) ? parsedDiffRate : stock.diffRate,
+    highPrice:
+      !isNaN(parsedHigh) && parsedHigh > 0 ? parsedHigh : stock.highPrice,
+    lowPrice: !isNaN(parsedLow) && parsedLow > 0 ? parsedLow : stock.lowPrice,
+    startPrice:
+      !isNaN(parsedStart) && parsedStart > 0 ? parsedStart : stock.startPrice,
+    volume: !isNaN(parsedVolume) ? parsedVolume : stock.volume,
+    date: (live as any).date || (stock as any).date,
+    highlightAnimation: "",
+  };
+};
+
 const HomePage: React.FC = () => {
-  const { lastMessage, userId } = useWebSocket();
+  const { lastMessage, lastSnapshot, userId } = useWebSocket();
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [allTickers, setAllTickers] = useState<Stock[]>([]);
   const [stockData, setStockData] = useState<Stock[]>([]);
@@ -151,7 +199,10 @@ const HomePage: React.FC = () => {
     const init = async () => {
       setLoading(true);
       try {
-                // 0. 게스트 유저 초기화 (DB + Redis 초기 잔고 워밍) - 1회
+        // 티커 목록 조회를 게스트 초기화와 병렬로 즉시 시작하여 초기 렌더링 지연 최소화
+        const tickersPromise = fetchTickers();
+
+        // 0. 게스트 유저 초기화 (DB + Redis 초기 잔고 워밍) - 1회
         if (userId && !initUserDone.current) {
           initUserDone.current = true;
           try {
@@ -161,50 +212,25 @@ const HomePage: React.FC = () => {
           }
         }
 
-        // 0-1. 보유 주식 포트폴리오 조회 (백엔드 API)
+        // 0-1. 보유 주식 포트폴리오 및 잔액 병렬 조회 (백엔드 API)
         if (userId) {
-          try {
-            await refetchPortfolio();
-          } catch (err) {
-            console.error("Portfolio fetch error:", err);
-          }
-
-          // 0-2. 현재 원화 잔액 조회 (백엔드 API: Redis 우선)
-          try {
-            await refetchBalance();
-          } catch (err) {
-            console.error("Balance fetch error:", err);
-          }
+          await Promise.allSettled([refetchPortfolio(), refetchBalance()]);
         }
 
         // 1. Fetch all tickers from DB
-        const tickersFromDB = await fetchTickers();
+        const tickersFromDB = await tickersPromise;
         let finalData = tickersFromDB;
 
         // 2. T1 설계: 지연 병합 (Deferred Merge)
-        // 로딩 완료 전에 도착한 스냅샷이 있다면 즉시 병합
+        // 로딩 완료 전에 도착한 스냅샷이 있다면 즉시 숫자형 변환과 함께 병합
         if (snapshotBuffer.current) {
           console.log("[Deferred Merge] Applying buffered snapshot to DB data");
           finalData = tickersFromDB.map((ticker: Stock) => {
             const live = snapshotBuffer.current?.find(
               (s) => s.ticker === ticker.ticker,
             );
-            if (live) {
-              return {
-                ...ticker,
-                endPrice: (live as any).price || live.endPrice,
-                diff: live.diff,
-                diffRate: live.diffRate,
-                highPrice: live.highPrice || ticker.highPrice,
-                lowPrice: live.lowPrice || ticker.lowPrice,
-                startPrice: (live as any).startPrice || ticker.startPrice,
-                volume: (live as any).volume || ticker.volume,
-                date: (live as any).date || (ticker as any).date,
-              };
-            }
-            return ticker;
+            return live ? mergeStockWithSnapshot(ticker, live) : ticker;
           });
-          snapshotBuffer.current = null; // 병합 후 버퍼 비우기
         }
 
         setAllTickers(finalData);
@@ -247,97 +273,56 @@ const HomePage: React.FC = () => {
     setLoading(false);
   }, [loading, hasMore, page, allTickers]);
 
-  // Update stock data when lastMessage arrives
+  // 1. Snapshot 전용 업데이트 (최초 접속 시 장 상태 메시지에 덮어씌워지지 않고 즉시 반영)
+  useEffect(() => {
+    if (!lastSnapshot || !Array.isArray(lastSnapshot)) return;
+
+    // 항상 최신 스냅샷을 버퍼에 보관 (DB 로딩이 늦게 끝나더라도 병합 보장)
+    snapshotBuffer.current = lastSnapshot;
+
+    if (!isTickersLoaded.current) {
+      console.log("[Snapshot Buffer] DB not loaded yet. Buffering snapshot.");
+      return;
+    }
+
+    // allTickers 업데이트 (숫자형 변환 포함)
+    setAllTickers((prev) =>
+      prev.map((ticker) => {
+        const found = lastSnapshot.find((s) => s.ticker === ticker.ticker);
+        return found ? mergeStockWithSnapshot(ticker, found) : ticker;
+      }),
+    );
+
+    // stockData 업데이트 (현재 UI 리스트 동기화, 숫자형 변환으로 toLocaleString 콤마 보장)
+    setStockData((prev) =>
+      prev.map((item) => {
+        const found = lastSnapshot.find((s) => s.ticker === item.ticker);
+        return found ? mergeStockWithSnapshot(item, found) : item;
+      }),
+    );
+
+    // selectedStock 업데이트
+    setSelectedStock((prev) => {
+      if (!prev) return null;
+      const found = lastSnapshot.find((s) => s.ticker === prev.ticker);
+      return found ? mergeStockWithSnapshot(prev, found) : prev;
+    });
+  }, [lastSnapshot]);
+
+  // 2. 단일 실시간 메시지 및 장 상태 업데이트
   useEffect(() => {
     if (!lastMessage) return;
 
     const { payload } = lastMessage;
 
-    // 1. Snapshot 전용 업데이트 (최초 접속 시 리스트 전체 갱신)
+    // 배열(Snapshot)은 위 lastSnapshot 전용 Effect에서 처리하므로 스킵
     if (Array.isArray(payload)) {
-      const snapshot = payload as StockPriceUpdate[];
-
-      // T1 설계: 로딩 전이라면 버퍼에 저장하고 종료
-      if (!isTickersLoaded.current) {
-        console.log("[Snapshot Buffer] DB not loaded yet. Buffering snapshot.");
-        snapshotBuffer.current = snapshot;
-        return;
-      }
-
-      // allTickers 업데이트 (검색 및 이후 로딩을 위해 전체 리스트 동기화)
-      setAllTickers((prev) =>
-        prev.map((ticker) => {
-          const found = snapshot.find((s) => s.ticker === ticker.ticker);
-          if (found) {
-            return {
-              ...ticker,
-              endPrice: (found as any).price || found.endPrice,
-              diff: found.diff,
-              diffRate: found.diffRate,
-              highPrice: found.highPrice || ticker.highPrice,
-              lowPrice: found.lowPrice || ticker.lowPrice,
-              startPrice: (found as any).startPrice || ticker.startPrice,
-              volume: (found as any).volume || ticker.volume,
-              date: (found as any).date || (ticker as any).date,
-            };
-          }
-          return ticker;
-        }),
-      );
-
-      // stockData 업데이트 (현재 UI에 표시되는 리스트 동기화, 애니메이션 없음)
-      setStockData((prev) =>
-        prev.map((item) => {
-          const found = snapshot.find((s) => s.ticker === item.ticker);
-          if (found) {
-            return {
-              ...item,
-              endPrice: (found as any).price || found.endPrice,
-              diff: found.diff,
-              diffRate: found.diffRate,
-              highPrice: found.highPrice || item.highPrice,
-              lowPrice: found.lowPrice || item.lowPrice,
-              startPrice: (found as any).startPrice || item.startPrice,
-              volume: (found as any).volume || item.volume,
-              date: (found as any).date || (item as any).date,
-              highlightAnimation: "",
-            };
-          }
-          return item;
-        }),
-      );
-
-      // selectedStock 업데이트
-      if (selectedStock) {
-        const found = snapshot.find((s) => s.ticker === selectedStock.ticker);
-        if (found) {
-          setSelectedStock((prev) => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              endPrice: (found as any).price || found.endPrice,
-              diff: found.diff,
-              diffRate: found.diffRate,
-              highPrice: found.highPrice || prev.highPrice,
-              lowPrice: found.lowPrice || prev.lowPrice,
-              startPrice: (found as any).startPrice || prev.startPrice,
-              volume: (found as any).volume || prev.volume,
-              date: (found as any).date || (prev as any).date,
-            };
-          });
-        }
-      }
       return;
     }
 
-    // T1 설계: 로딩 완료 전 단일 업데이트는 무시하거나 버퍼링할 수 있으나,
-    // 여기서는 스냅샷을 통한 전체 동기화가 우선이므로 스킵
-    if (!isTickersLoaded.current) return;
-
-    // 2. 단일 업데이트 처리
     const kafkaData: KafkaData = payload;
 
-    // 시장 상태 업데이트 (ticker가 -1인 경우)
+    // 시장 상태 업데이트 (ticker가 -1인 경우 DB 로딩 완료 여부와 무관하게 즉시 반영)
     if ((kafkaData as MarketStatusUpdate).ticker === "-1") {
       const statusUpdate = kafkaData as MarketStatusUpdate;
       setMarketStatus((prev) =>
@@ -356,6 +341,8 @@ const HomePage: React.FC = () => {
           : { isOpen: true, message: "현재 장 오픈되어 있습니다." },
       );
     }
+
+    if (!isTickersLoaded.current) return;
 
     const update = kafkaData as StockPriceUpdate;
     if (!update.ticker) return;

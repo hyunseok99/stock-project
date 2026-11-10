@@ -7,12 +7,13 @@ import React, {
   useCallback,
 } from "react";
 import type { ReactNode } from "react";
-import type { WrappedMessage } from "../types/stock";
+import type { WrappedMessage, StockPriceUpdate } from "../types/stock";
 
 interface WebSocketContextType {
   socket: WebSocket | null;
   isConnected: boolean;
   lastMessage: WrappedMessage | null;
+  lastSnapshot: StockPriceUpdate[] | null;
   sendMessage: (message: any) => void;
   userId: string | null;
   reconnect: () => void;
@@ -24,19 +25,31 @@ const WebSocketContext = createContext<WebSocketContextType | undefined>(
 
 let globalSocket: WebSocket | null = null;
 
+const getOrCreateUserId = (): string => {
+  let storedUserId = sessionStorage.getItem("stock_user_id");
+  if (!storedUserId) {
+    storedUserId = "guest_" + crypto.randomUUID().substring(0, 8);
+    sessionStorage.setItem("stock_user_id", storedUserId);
+  }
+  return storedUserId;
+};
+
 export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<WrappedMessage | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [lastSnapshot, setLastSnapshot] = useState<StockPriceUpdate[] | null>(
+    null,
+  );
+  const [userId] = useState<string | null>(() => getOrCreateUserId());
 
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const isUnmountedRef = useRef(false);
   const lastMessageTimeRef = useRef<number>(Date.now());
-  const userIdRef = useRef<string | null>(null);
+  const userIdRef = useRef<string | null>(userId);
 
   // 소켓 강제 종료 및 즉시 재연결
   const connect = useCallback(() => {
@@ -93,6 +106,10 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({
         lastMessageTimeRef.current = Date.now();
         try {
           const data = JSON.parse(event.data);
+          // 스냅샷 배열 메시지는 직후(0.5ms 내) 도착하는 장 상태 메시지에 덮어씌워지지 않도록 별도 상태로 분리 보존
+          if (Array.isArray(data)) {
+            setLastSnapshot(data as StockPriceUpdate[]);
+          }
           setLastMessage({
             payload: data,
             timestamp: Date.now(),
@@ -138,14 +155,7 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({
 
   useEffect(() => {
     isUnmountedRef.current = false;
-
-    let storedUserId = sessionStorage.getItem("stock_user_id");
-    if (!storedUserId) {
-      storedUserId = "guest_" + crypto.randomUUID().substring(0, 8);
-      sessionStorage.setItem("stock_user_id", storedUserId);
-    }
-    setUserId(storedUserId);
-    userIdRef.current = storedUserId;
+    userIdRef.current = userId;
 
     connect();
 
@@ -255,6 +265,7 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({
         socket,
         isConnected,
         lastMessage,
+        lastSnapshot,
         sendMessage,
         userId,
         reconnect: manualReconnect,
