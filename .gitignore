@@ -1,5 +1,8 @@
 # --- 공통 ---
 .env
+*.env
+!.env.production
+!.env.example
 *.db
 *.log
 .DS_Store
