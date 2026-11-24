@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Box,
   Button,
@@ -14,6 +14,7 @@ interface BuyModalProps {
   onClose: () => void;
   stock: Stock | null;
   userId: string | null;
+  balance?: number | null;
   onOrderSubmitted?: () => void;
 }
 
@@ -22,17 +23,28 @@ const BuyModal: React.FC<BuyModalProps> = ({
   onClose,
   stock,
   userId,
+  balance,
   onOrderSubmitted,
 }) => {
   const [quantity, setQuantity] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setQuantity("");
+    setError(null);
+  }, [open]);
+
   const parsedQty = Number(quantity);
   const totalPrice =
     stock && quantity && !Number.isNaN(parsedQty)
       ? Math.floor(stock.endPrice * parsedQty)
       : 0;
+
+  const maxBuyableQuantity =
+    balance != null && stock && stock.endPrice > 0
+      ? Math.max(0, Math.floor(balance / stock.endPrice))
+      : null;
 
   const handleSubmit = async () => {
     if (!userId) {
@@ -98,6 +110,17 @@ const BuyModal: React.FC<BuyModalProps> = ({
           </Typography>
         )}
 
+        {balance != null && (
+          <Typography variant="body2" color="textSecondary">
+            사용 가능 잔액: {balance.toLocaleString()}원
+          </Typography>
+        )}
+        {maxBuyableQuantity !== null && (
+          <Typography variant="body2" color="textSecondary">
+            최대 매수 가능 수량: {maxBuyableQuantity.toLocaleString()}주
+          </Typography>
+        )}
+
         <TextField
           fullWidth
           type="number"
@@ -112,6 +135,26 @@ const BuyModal: React.FC<BuyModalProps> = ({
           helperText={error || ""}
           sx={{ mt: 2 }}
         />
+
+        {maxBuyableQuantity !== null && (
+          <Box sx={{ display: "flex", gap: 1, mt: 1 }}>
+            {[25, 50, 100].map((percent) => (
+              <Button
+                key={percent}
+                size="small"
+                variant="outlined"
+                disabled={maxBuyableQuantity <= 0}
+                onClick={() => {
+                  const quickQuantity = Math.floor((maxBuyableQuantity * percent) / 100);
+                  setQuantity(String(quickQuantity));
+                  setError(null);
+                }}
+              >
+                {percent}%
+              </Button>
+            ))}
+          </Box>
+        )}
 
         <Typography variant="body2" sx={{ mt: 1 }}>
           예상 총 결제 금액: <b>{totalPrice.toLocaleString()}원</b>

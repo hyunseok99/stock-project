@@ -17,6 +17,7 @@ import StockChart from "../components/stock/StockChart";
 import StockReport from "../components/stock/StockReport";
 import DepositModal from "../components/stock/DepositModal";
 import BuyModal from "../components/stock/BuyModal";
+import SellModal from "../components/stock/SellModal";
 import { useWebSocket } from "../contexts/WebSocketContext";
 import { fetchTickers, initUser, fetchPortfolio, getBalance } from "../api/stockApi";
 import { useOrderNotifications } from "../hooks/useOrderNotifications";
@@ -93,10 +94,11 @@ const HomePage: React.FC = () => {
     message: "장 상태를 확인하고 있습니다.",
   });
 
-  // 입금 / 출금 / 구매 모달 및 알림 상태
+  // 입금 / 출금 / 매수 / 매도 모달 및 알림 상태
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
+  const [sellOpen, setSellOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{
     message: string;
     severity: "success" | "error" | "info";
@@ -119,11 +121,12 @@ const HomePage: React.FC = () => {
 
     const s = (lastNotification.status ?? "").toUpperCase();
     const isSuccess = !s.includes("FAIL");
+    const action = lastNotification.orderType === "SELL" ? "매도" : "매수";
     setSnackbar({
       severity: isSuccess ? "success" : "error",
       message: isSuccess
-        ? `구매 완료! ${lastNotification.ticker} ${lastNotification.message ?? ""}`
-        : `구매 실패 - ${lastNotification.message ?? "알 수 없는 이유"}`,
+        ? `${action} 완료! ${lastNotification.ticker} ${lastNotification.message ?? ""}`
+        : `${action} 실패 - ${lastNotification.message ?? "알 수 없는 이유"}`,
     });
   }, [lastNotification]);
 
@@ -133,6 +136,8 @@ const HomePage: React.FC = () => {
 
     // 보유 주식 상태 관리 (백엔드 API 기반)
   const [holdings, setHoldings] = useState<Holding[]>([]);
+  const selectedHolding = holdings.find((holding) => holding.ticker === selectedStock?.ticker);
+  const holdingQuantity = selectedHolding?.quantity ?? 0;
 
   // 원화 잔액 상태 관리 (백엔드 API 기반: Redis 우선 조회)
   const [balance, setBalance] = useState<number | null>(null);
@@ -441,6 +446,32 @@ const HomePage: React.FC = () => {
   const handleStockSelect = useCallback((stock: Stock) => {
     setSelectedStock(stock);
   }, []);
+
+  const findStockByTicker = (ticker: string) =>
+    allTickers.find((stock) => stock.ticker === ticker) ??
+    stockData.find((stock) => stock.ticker === ticker);
+
+  const handleHoldingSelect = (ticker: string) => {
+    const stock = findStockByTicker(ticker);
+    if (stock) setSelectedStock(stock);
+  };
+
+  const handleQuickSell = (holding: Holding) => {
+    const stock = findStockByTicker(holding.ticker) ?? {
+      ticker: holding.ticker,
+      tickerName: holding.name,
+      endPrice: holding.purchasePrice,
+      diff: 0,
+      diffRate: 0,
+      volume: 0,
+      highPrice: 0,
+      lowPrice: 0,
+      startPrice: 0,
+    };
+
+    setSelectedStock(stock);
+    setSellOpen(true);
+  };
 
   // 시세 재생(Replay) 시작 - Kafka 수집분을 SSE로 받아 stockData를 실시간 갱신
   const startReplay = useCallback(() => {
@@ -752,8 +783,10 @@ const HomePage: React.FC = () => {
                     <Box
                       sx={{
                         display: "flex",
-                        justifyContent: "flex-end",
-                        mt: -1,
+                        gap: 1,
+                        position: "absolute",
+                        top: 48,
+                        right: 12,
                       }}
                     >
                       <Button
@@ -763,12 +796,18 @@ const HomePage: React.FC = () => {
                         sx={{
                           whiteSpace: "nowrap",
                           minWidth: 84,
-                          position: "absolute",
-                          top: 48,
-                          right: 12,
                         }}
                       >
                         구매
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        disabled={holdingQuantity <= 0}
+                        onClick={() => setSellOpen(true)}
+                        sx={{ whiteSpace: "nowrap", minWidth: 84 }}
+                      >
+                        판매
                       </Button>
                     </Box>
                   </Box>
@@ -780,13 +819,15 @@ const HomePage: React.FC = () => {
                   </Box>
                 </Paper>
               ) : (
-                                <StockReport
+                <StockReport
                   stockData={stockData}
                   holdings={holdings}
                   balance={balance}
                   userId={userId}
                   onDepositClick={() => setDepositOpen(true)}
                   onWithdrawClick={() => setWithdrawOpen(true)}
+                  onSelectTicker={handleHoldingSelect}
+                  onQuickSell={handleQuickSell}
                 />
               )}
             </Box>
@@ -805,7 +846,7 @@ const HomePage: React.FC = () => {
           </Grid>
         </Grid>
 
-        {/* 입금 / 출금 / 구매 모달 */}
+        {/* 입금 / 출금 / 매수 / 매도 모달 */}
         <DepositModal
           open={depositOpen}
           onClose={() => setDepositOpen(false)}
@@ -834,8 +875,21 @@ const HomePage: React.FC = () => {
           onClose={() => setBuyOpen(false)}
           stock={selectedStock}
           userId={userId}
+          balance={balance}
           onOrderSubmitted={() =>
             setSnackbar({ severity: "info", message: "구매 요청이 접수되었습니다. 체결 결과를 기다려주세요." })
+          }
+        />
+
+        <SellModal
+          open={sellOpen}
+          onClose={() => setSellOpen(false)}
+          stock={selectedStock}
+          userId={userId}
+          holdingQuantity={holdingQuantity}
+          averagePrice={selectedHolding?.purchasePrice}
+          onOrderSubmitted={() =>
+            setSnackbar({ severity: "info", message: "판매 요청이 접수되었습니다. 체결 결과를 기다려주세요." })
           }
         />
 
