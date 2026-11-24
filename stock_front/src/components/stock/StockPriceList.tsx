@@ -5,10 +5,16 @@ import React, {
   useEffect,
   useCallback,
 } from "react";
+import StarIcon from "@mui/icons-material/Star";
+import StarBorderIcon from "@mui/icons-material/StarBorder";
 import "./StockPriceList.css";
 import type { Stock } from "../../types/stock";
 import {
   Box,
+  Button,
+  Chip,
+  IconButton,
+  TextField,
   Select,
   MenuItem,
   FormControl,
@@ -28,6 +34,20 @@ interface StockPriceListProps {
   loading: boolean;
 }
 
+const WATCHLIST_KEY = "stock_watchlist_tickers";
+
+const readWatchlist = (): Set<string> => {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(WATCHLIST_KEY) ?? "[]");
+    if (Array.isArray(stored)) {
+      return new Set(stored.filter((ticker): ticker is string => typeof ticker === "string"));
+    }
+  } catch {
+    // 저장소에 접근할 수 없는 경우에도 목록을 사용할 수 있다.
+  }
+  return new Set();
+};
+
 const StockPriceList: React.FC<StockPriceListProps> = ({
   parentStockData,
   parentSelectedStock,
@@ -43,6 +63,22 @@ const StockPriceList: React.FC<StockPriceListProps> = ({
   }, []);
 
   const [filterBy, setFilterBy] = useState<string>("diffRate");
+  const [search, setSearch] = useState("");
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const [watchlist, setWatchlist] = useState(readWatchlist);
+  const query = search.trim().toLowerCase();
+
+  const toggleWatchlist = (ticker: string) => {
+    const next = new Set(watchlist);
+    if (!next.delete(ticker)) next.add(ticker);
+    setWatchlist(next);
+    try {
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify([...next]));
+    } catch {
+      // 저장소를 사용할 수 없으면 현재 화면에서만 관심종목을 유지한다.
+    }
+  };
+
   const listContainerRef = useRef<HTMLDivElement>(null);
 
   const handleScroll = useCallback(() => {
@@ -77,7 +113,18 @@ const StockPriceList: React.FC<StockPriceListProps> = ({
       );
     }
 
-    // 3. Apply sorting based on filter selection
+    if (watchlistOnly) {
+      currentData = currentData.filter((stock) => watchlist.has(stock.ticker));
+    }
+    if (query) {
+      currentData = currentData.filter(
+        (stock) =>
+          stock.tickerName?.toLowerCase().includes(query) ||
+          stock.ticker.toLowerCase().includes(query),
+      );
+    }
+
+    // Apply sorting based on filter selection
     if (filterBy === "price") {
       currentData.sort((a, b) => b.endPrice - a.endPrice);
     } else if (filterBy === "diffRate") {
@@ -87,7 +134,7 @@ const StockPriceList: React.FC<StockPriceListProps> = ({
     }
 
     return currentData;
-  }, [parentStockData, tickersFromEnv, filterBy]);
+  }, [parentStockData, tickersFromEnv, filterBy, query, watchlistOnly, watchlist]);
 
   const handleFilterChange = (event: SelectChangeEvent<string>) => {
     setFilterBy(event.target.value);
@@ -121,6 +168,30 @@ const StockPriceList: React.FC<StockPriceListProps> = ({
           </FormControl>
         </div>
       </div>
+
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, px: 2, pt: 1.5 }}>
+        <TextField
+          fullWidth
+          size="small"
+          label="종목명 또는 티커 검색"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <Chip
+          size="small"
+          label="전체"
+          color={watchlistOnly ? "default" : "primary"}
+          aria-pressed={!watchlistOnly}
+          onClick={() => setWatchlistOnly(false)}
+        />
+        <Chip
+          size="small"
+          label={`관심종목 (${watchlist.size})`}
+          color={watchlistOnly ? "primary" : "default"}
+          aria-pressed={watchlistOnly}
+          onClick={() => setWatchlistOnly(true)}
+        />
+      </Box>
 
       <div ref={listContainerRef} className="stock-price-list-stock-list">
         {filteredStockData.length > 0 ? (
@@ -163,6 +234,22 @@ const StockPriceList: React.FC<StockPriceListProps> = ({
                       </div>
                     </div>
                   </div>
+                  <IconButton
+                    size="small"
+                    aria-label={`${stock.tickerName || stock.ticker} 관심종목`}
+                    aria-pressed={watchlist.has(stock.ticker)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleWatchlist(stock.ticker);
+                    }}
+                    sx={{ ml: 0.5 }}
+                  >
+                    {watchlist.has(stock.ticker) ? (
+                      <StarIcon fontSize="small" color="warning" />
+                    ) : (
+                      <StarBorderIcon fontSize="small" />
+                    )}
+                  </IconButton>
                 </ListItem>
               </React.Fragment>
             ))}
@@ -172,6 +259,13 @@ const StockPriceList: React.FC<StockPriceListProps> = ({
             <Typography variant="body2" color="textSecondary">
               No stocks available.
             </Typography>
+          </Box>
+        )}
+        {(query || watchlistOnly) && hasMore && !loading && (
+          <Box sx={{ textAlign: "center", py: 1 }}>
+            <Button size="small" onClick={onLoadMore}>
+              종목 더 불러오기
+            </Button>
           </Box>
         )}
         {loading && (

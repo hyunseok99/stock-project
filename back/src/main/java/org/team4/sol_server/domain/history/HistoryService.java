@@ -6,11 +6,16 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.team4.sol_server.domain.history.dto.TradeHistoryItemDTO;
+import org.team4.sol_server.domain.history.dto.TradeHistoryStatsDTO;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.IntSummaryStatistics;
 import java.util.List;
+import java.util.Locale;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 @Service
 @RequiredArgsConstructor
@@ -31,14 +36,29 @@ public class HistoryService {
      * @param limit  최대 조회 건수 (1~200)
      */
     public List<TradeHistoryItemDTO> getHistories(String userId, int limit) {
-        int safeLimit = Math.min(Math.max(limit, 1), 200);
-        Pageable page = PageRequest.of(0, safeLimit);
+        return getHistories(userId, limit, null, null);
+    }
 
-        // 1) 각 테이블에서 최신순 N건씩 조회
-        List<CashTransactionHistory> cashList =
-                cashTransactionHistoryRepository.findByUserIdOrderByCreatedAtDesc(userId, page);
-        List<OrderHistory> orderList =
-                orderHistoryRepository.findByUserIdOrderByOrderedAtDesc(userId, page);
+    public List<TradeHistoryItemDTO> getHistories(String userId, int limit, String type, String ticker) {
+        int safeLimit = Math.min(Math.max(limit, 1), 200);
+        String typeFilter = type == null ? "" : type.strip().toUpperCase(Locale.ROOT);
+        String tickerFilter = ticker == null ? "" : ticker.strip().toUpperCase(Locale.ROOT);
+        boolean allTypes = typeFilter.isEmpty() || "ALL".equals(typeFilter);
+
+        List<CashTransactionHistory> cashList = tickerFilter.isEmpty()
+                && (allTypes || "DEPOSIT".equals(typeFilter) || "WITHDRAWAL".equals(typeFilter))
+                ? findMatching(safeLimit, page -> cashTransactionHistoryRepository
+                        .findByUserIdOrderByCreatedAtDesc(userId, page),
+                        cash -> allTypes || typeFilter.equalsIgnoreCase(cash.getTransactionType()))
+                : List.of();
+        List<OrderHistory> orderList = allTypes || OrderHistory.TYPE_BUY.equals(typeFilter)
+                || OrderHistory.TYPE_SELL.equals(typeFilter)
+                ? findMatching(safeLimit, page -> orderHistoryRepository
+                        .findByUserIdOrderByOrderedAtDesc(userId, page),
+                        order -> (allTypes || typeFilter.equalsIgnoreCase(order.getOrderType()))
+                                && (tickerFilter.isEmpty() || (order.getTicker() != null
+                                && order.getTicker().toUpperCase(Locale.ROOT).contains(tickerFilter))))
+                : List.of();
 
         // 2) 통합 DTO 변환
         List<TradeHistoryItemDTO> merged = new ArrayList<>(cashList.size() + orderList.size());
@@ -82,5 +102,64 @@ public class HistoryService {
             return new ArrayList<>(merged.subList(0, safeLimit));
         }
         return merged;
+    }
+
+    private static <T> List<T> findMatching(int limit, Function<Pageable, List<T>> fetchPage,
+                                           Predicate<T> matches) {
+        List<T> results = new ArrayList<>(limit);
+        Pageable page = PageRequest.of(0, limit);
+        while (results.size() < limit) {
+            List<T> items = fetchPage.apply(page);
+            items.stream().filter(matches).limit(limit - results.size()).forEach(results::add);
+            if (items.size() < page.getPageSize()) {
+                break;
+            }
+            page = page.next();
+        }
+        return results;
+    }
+
+    public TradeHistoryStatsDTO getHistoryStats(String userId) {
+        List<OrderHistory> orders = orderHistoryRepository
+                .findByUserIdOrderByOrderedAtDesc(userId, PageRequest.of(0, 500));
+        int successOrders = 0;
+        long totalBuyAmount = 0;
+        long totalSellAmount = 0;
+        IntSummaryStatistics totalLatency = new IntSummaryStatistics();
+        IntSummaryStatistics kafkaLag = new IntSummaryStatistics();
+
+        for (OrderHistory order : orders) {
+            if (order.getTotalLatencyMs() != null) {
+                totalLatency.accept(order.getTotalLatencyMs());
+            }
+            if (order.getKafkaLagMs() != null) {
+                kafkaLag.accept(order.getKafkaLagMs());
+            }
+            if ("SUCCESS".equalsIgnoreCase(order.getStatus())) {
+                successOrders++;
+                if (OrderHistory.TYPE_BUY.equalsIgnoreCase(order.getOrderType())) {
+                    totalBuyAmount += order.getAmount();
+                } else if (OrderHistory.TYPE_SELL.equalsIgnoreCase(order.getOrderType())) {
+                    totalSellAmount += order.getAmount();
+                }
+            }
+        }
+
+        int totalOrders = orders.size();
+        return TradeHistoryStatsDTO.builder()
+                .totalOrders(totalOrders)
+                .successOrders(successOrders)
+                .failedOrders(totalOrders - successOrders)
+                .successRate(totalOrders == 0 ? 0.0 : roundToTwoDecimals(100.0 * successOrders / totalOrders))
+                .avgTotalLatencyMs(roundToTwoDecimals(totalLatency.getAverage()))
+                .maxTotalLatencyMs(totalLatency.getCount() == 0 ? 0L : totalLatency.getMax())
+                .avgKafkaLagMs(roundToTwoDecimals(kafkaLag.getAverage()))
+                .totalBuyAmount(totalBuyAmount)
+                .totalSellAmount(totalSellAmount)
+                .build();
+    }
+
+    private static double roundToTwoDecimals(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 }

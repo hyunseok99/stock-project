@@ -234,21 +234,55 @@ export interface TradeHistoryItem {
   retryCount?: number | null;
 }
 
+export interface TradeHistoryStats {
+  totalOrders: number;
+  successOrders: number;
+  failedOrders: number;
+  successRate: number;
+  avgTotalLatencyMs: number;
+  maxTotalLatencyMs: number;
+  avgKafkaLagMs: number;
+  totalBuyAmount: number;
+  totalSellAmount: number;
+}
+
 /**
  * 유저의 입출금 + 주문 체결 통합 거래 히스토리를 최신순으로 조회한다.
  */
 export const fetchTradeHistory = async (
   userId: string,
   limit: number = 30,
+  options?: { type?: string; ticker?: string },
 ): Promise<TradeHistoryItem[]> => {
   try {
-    const response = await axiosInstance.get(`/api/history`, {
-      params: { userId, limit },
+    const type = options?.type?.trim();
+    const ticker = options?.ticker?.trim();
+    const response = await axiosInstance.get("/api/history", {
+      params: {
+        userId,
+        limit,
+        ...(type && type.toUpperCase() !== "ALL" ? { type } : {}),
+        ...(ticker ? { ticker } : {}),
+      },
     });
     return Array.isArray(response.data) ? response.data : [];
   } catch (error) {
     console.error("Failed to fetch trade history:", error);
     return [];
+  }
+};
+
+export const fetchTradeHistoryStats = async (
+  userId: string,
+): Promise<TradeHistoryStats | null> => {
+  try {
+    const response = await axiosInstance.get<TradeHistoryStats>("/api/history/stats", {
+      params: { userId },
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Failed to fetch trade history stats:", error);
+    return null;
   }
 };
 
