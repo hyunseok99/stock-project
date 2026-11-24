@@ -5,11 +5,14 @@ import {
   CircularProgress,
   Collapse,
   Modal,
+  TextField,
   Typography,
 } from "@mui/material";
 import {
   fetchTradeHistory,
+  fetchTradeHistoryStats,
   type TradeHistoryItem,
+  type TradeHistoryStats,
 } from "../../api/stockApi";
 
 interface HistoryModalProps {
@@ -24,6 +27,8 @@ const TYPE_LABEL: Record<string, string> = {
   BUY: "매수",
   SELL: "매도",
 };
+
+const HISTORY_FILTERS = ["ALL", "BUY", "SELL", "DEPOSIT", "WITHDRAWAL"] as const;
 
 const TYPE_COLOR: Record<string, "primary" | "error" | "success" | "warning"> = {
   DEPOSIT: "primary",
@@ -72,6 +77,9 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
   userId,
 }) => {
   const [histories, setHistories] = useState<TradeHistoryItem[]>([]);
+  const [selectedType, setSelectedType] = useState<(typeof HISTORY_FILTERS)[number]>("ALL");
+  const [tickerFilter, setTickerFilter] = useState("");
+  const [stats, setStats] = useState<TradeHistoryStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -81,11 +89,31 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
 
     const load = async () => {
       setLoading(true);
-      const data = await fetchTradeHistory(userId);
-      if (!cancelled) setHistories(data);
-      setLoading(false);
+      setExpandedId(null);
+      const data = await fetchTradeHistory(userId, 30, {
+        type: selectedType,
+        ticker: tickerFilter,
+      });
+      if (!cancelled) {
+        setHistories(data);
+        setLoading(false);
+      }
     };
     load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, userId, selectedType, tickerFilter]);
+
+  useEffect(() => {
+    setStats(null);
+    if (!open || !userId) return;
+    let cancelled = false;
+
+    void fetchTradeHistoryStats(userId).then((data) => {
+      if (!cancelled) setStats(data);
+    });
 
     return () => {
       cancelled = true;
@@ -101,6 +129,8 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
           left: "50%",
           transform: "translate(-50%, -50%)",
           width: 500,
+          maxWidth: "calc(100% - 32px)",
+          boxSizing: "border-box",
           maxHeight: "75vh",
           bgcolor: "background.paper",
           borderRadius: 2,
@@ -113,6 +143,66 @@ const HistoryModal: React.FC<HistoryModalProps> = ({
         <Typography variant="h6" gutterBottom sx={{ fontWeight: 700 }}>
           거래 내역
         </Typography>
+
+        {stats && (
+          <Box
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 1.5,
+              bgcolor: "action.hover",
+              borderRadius: 1.5,
+              p: 1.25,
+              mb: 1.5,
+            }}
+          >
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block">
+                체결 성공률
+              </Typography>
+              <Typography variant="body2" fontWeight={700}>
+                {stats.successRate}% / {stats.totalOrders}건
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block">
+                평균 총 지연
+              </Typography>
+              <Typography variant="body2" fontWeight={700}>
+                {stats.avgTotalLatencyMs} ms (최대 {stats.maxTotalLatencyMs} ms)
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block">
+                평균 Kafka Lag
+              </Typography>
+              <Typography variant="body2" fontWeight={700}>
+                {stats.avgKafkaLagMs} ms
+              </Typography>
+            </Box>
+          </Box>
+        )}
+
+        <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1, mb: 1.5 }}>
+          {HISTORY_FILTERS.map((type) => (
+            <Chip
+              key={type}
+              size="small"
+              label={type === "ALL" ? "전체" : TYPE_LABEL[type]}
+              color={selectedType === type ? "primary" : "default"}
+              variant={selectedType === type ? "filled" : "outlined"}
+              aria-pressed={selectedType === type}
+              onClick={() => setSelectedType(type)}
+            />
+          ))}
+          <TextField
+            size="small"
+            label="티커 검색"
+            value={tickerFilter}
+            onChange={(event) => setTickerFilter(event.target.value)}
+            sx={{ width: 130 }}
+          />
+        </Box>
 
         {loading ? (
           <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
