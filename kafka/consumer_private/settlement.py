@@ -15,7 +15,7 @@ def run_settlement():
     start_time = time.time()
 
     # =========================================================================
-    # 0단계: 정산 범위(Order ID Checkpoint) 설정
+    # 0단계: 정산 범위(Order ID / Cash ID Checkpoint) 설정
     # =========================================================================
     with engine.connect() as conn:
         # A. 이전 정산 시 저장되었던 가장 마지막 last_settled_order_id, last_settled_cash_id 조회 (없으면 0)
@@ -26,7 +26,7 @@ def run_settlement():
         last_settled_order_id = checkpoint_row[0] if checkpoint_row else 0
         last_settled_cash_id = checkpoint_row[1] if checkpoint_row else 0
 
-        # B. 현재 시점 order_history, cash_Transaction_history의 가장 마지막 id 조회 (Auto Increment PK)
+        # B. 현재 시점 order_history, cash_transactions_history의 가장 마지막 id 조회 (Auto Increment PK)
         current_max_order_id = conn.execute(
             text("SELECT COALESCE(MAX(id), :last_id) FROM order_history"),
             {"last_id": last_settled_order_id}
@@ -46,13 +46,13 @@ def run_settlement():
     has_new_cashes = last_settled_cash_id < current_max_cash_id
     has_new_activity = has_new_orders or has_new_cashes
 
-    if not has_new_orders:
-        print("ℹ️ 신규 체결 및 입출금 내역이 없어 1~2단계 정산을 스킵하고 3단계 캐시 재워밍으로 진행합니다.")
+    if not has_new_activity:
+        print("ℹ️ 신규 체결 및 입출금 내역이 없어 1단계 원장 정산을 스킵하고 2~3단계 정합성 검증 및 캐시 재워밍으로 진행합니다.")
 
     # =========================================================================
     # 1단계: 원장(주문+입출금) vs Redis 잔고 정합성 검증 & DB users 동기화
     # =========================================================================
-    if has_new_orders:
+    if has_new_activity:
         print("1️⃣ Redis 잔고 vs 통합 원장(주문+입출금) 정합성 검증(Audit) 진행 중...")
 
         with engine.connect() as conn:
@@ -107,7 +107,6 @@ def run_settlement():
                     for r in cash_rows
                 }
 
-
         # C. Redis 잔고 스캔
         balance_keys = redis_client.keys("user:balance:*")
         redis_balance_map = {}
@@ -159,7 +158,7 @@ def run_settlement():
                 "balance": final_bal
             })
 
-        # E. DB 적재 (users.balance 업데이트 및 settlement_checkpoint 2건 추가)
+        # E. DB 적재 (users.balance 업데이트 및 settlement_checkpoint 추가)
         with engine.begin() as conn:
             if user_final_balance_updates:
                 update_user_sql = text("UPDATE users SET balance = :balance WHERE user_id = :user_id")
@@ -177,73 +176,82 @@ def run_settlement():
         print(f"✅ [1단계 완료] 총 {len(user_final_balance_updates)}명 검증 완료 (정상: {len(user_final_balance_updates)-mismatch_count}명, 불일치/복구: {mismatch_count}명)")
 
     # =========================================================================
-    # 2단계: 체크포인트 구간 order_history 기반 user_stocks (보유주식/평단가) 정산
+    # 2단계: Redis 보유주식(Source of Truth) vs DB user_stocks 정합성 검증 및 보정
+    # - main.py에서 체결 시 실시간으로 user_stocks를 갱신하지만, 비동기 DB 반영 중
+    #   오류나 지연으로 DB와 Redis 데이터의 정합성이 깨진 경우 Redis 기준으로 DB를 맞춤
     # =========================================================================
-    if has_new_orders:
-        print("2️⃣ 체크포인트 범위 체결 내역 기반 보유 주식 및 평단가 정산 중...")
+    print("2️⃣ Redis 보유 주식(Source of Truth) vs DB user_stocks 정합성 검증 및 보정 중...")
 
-        fetch_orders_sql = text("""
-            SELECT user_id, ticker, order_type, price, quantity
-            FROM order_history
-            WHERE status = 'SUCCESS' 
-              AND id > :last_settled_order_id 
-              AND id <= :current_max_order_id
-            ORDER BY id ASC
-        """)
+    # A. Redis의 보유 주식 수량 스캔 (user:stock:{user_id}:{ticker})
+    stock_keys = redis_client.keys("user:stock:*")
+    redis_stock_map = {}
+    if stock_keys:
+        pipe = redis_client.pipeline()
+        for key in stock_keys:
+            pipe.get(key)
+        stock_qtys = pipe.execute()
+        for key, qty in zip(stock_keys, stock_qtys):
+            if qty is not None:
+                parts = key.split(":")
+                if len(parts) >= 4:
+                    u_id = ":".join(parts[2:-1])
+                    ticker = parts[-1]
+                    redis_stock_map[(u_id, ticker)] = int(qty)
 
-        with engine.connect() as conn:
-            today_orders = conn.execute(
-                fetch_orders_sql, 
-                {"last_settled_order_id": last_settled_order_id, "current_max_order_id": current_max_order_id}
-            ).fetchall()
+    # B. DB user_stocks 현재 보유 수량 및 평단가 조회
+    db_stock_map = {}
+    with engine.connect() as conn:
+        existing_rows = conn.execute(
+            text("SELECT user_id, ticker, quantity, average_price FROM user_stocks")
+        ).fetchall()
+        for r in existing_rows:
+            db_stock_map[(str(r.user_id), str(r.ticker))] = (int(r.quantity), int(r.average_price))
 
-        user_stock_map = {}
-        for row in today_orders:
-            key = (str(row.user_id), str(row.ticker))
-            if key not in user_stock_map:
-                user_stock_map[key] = []
-            user_stock_map[key].append(row)
+    # C. DB vs Redis 수량 비교 및 불일치 항목 추출 (Redis를 기준으로 정합성 맞춤)
+    all_stock_pairs = set(redis_stock_map.keys()) | set(db_stock_map.keys())
+    mismatched_pairs = []
 
-        # N+1 최적화: 기존 주식 잔고 1회 미리 조회
-        existing_stocks_map = {}
-        if user_stock_map:
-            with engine.connect() as conn:
-                existing_rows = conn.execute(
-                    text("SELECT user_id, ticker, quantity, average_price FROM user_stocks")
-                ).fetchall()
-                for r in existing_rows:
-                    existing_stocks_map[(str(r.user_id), str(r.ticker))] = (r.quantity, r.average_price)
+    for pair in all_stock_pairs:
+        u_id, ticker = pair
+        db_qty, db_avg = db_stock_map.get(pair, (0, 0))
+        # Redis에 키가 있으면 Redis 수량 기준, 없으면(캐시 미워밍 등) DB 수량 유지
+        redis_qty = redis_stock_map.get(pair, db_qty)
 
-        processed_stock_count = 0
+        if redis_qty != db_qty:
+            mismatched_pairs.append((u_id, ticker, redis_qty, db_qty, db_avg))
 
+    # D. 불일치 발생 시에만 Redis 수량 기준으로 DB user_stocks 보정
+    if mismatched_pairs:
         with engine.begin() as conn:
-            for (u_id, ticker), orders in user_stock_map.items():
-                existing_stock = existing_stocks_map.get((u_id, ticker), (0, 0))
-                cur_qty, cur_avg = existing_stock[0], existing_stock[1]
+            for u_id, ticker, redis_qty, db_qty, db_avg in mismatched_pairs:
+                print(f"⚠️ [주식 정합성 불일치 감지] user_id={u_id}, ticker={ticker} | Redis={redis_qty}주 vs DB={db_qty}주 ➔ Redis 기준으로 보정")
 
-                for order in orders:
-                    o_type, price, qty = order.order_type, order.price, order.quantity
-                    if o_type == 'BUY':
-                        new_qty = cur_qty + qty
-                        cur_avg = ((cur_qty * cur_avg) + (qty * price)) // new_qty
-                        cur_qty = new_qty
-                    elif o_type == 'SELL':
-                        cur_qty = max(0, cur_qty - qty)
+                if redis_qty > 0:
+                    avg_price = db_avg
+                    # DB에 기존 평단가가 없는 경우(신규 매수 DB 반영 누락 등), 최근 매수 체결가에서 복구
+                    if avg_price <= 0:
+                        latest_price = conn.execute(
+                            text("""
+                                SELECT price FROM order_history
+                                WHERE user_id = :u_id AND ticker = :ticker
+                                  AND status = 'SUCCESS' AND order_type = 'BUY'
+                                ORDER BY id DESC LIMIT 1
+                            """),
+                            {"u_id": u_id, "ticker": ticker}
+                        ).scalar()
+                        avg_price = int(latest_price or 0)
 
-                if cur_qty > 0:
                     upsert_sql = text("""
                         INSERT INTO user_stocks (user_id, ticker, quantity, average_price)
                         VALUES (:u_id, :ticker, :qty, :avg_price)
                         ON DUPLICATE KEY UPDATE quantity = :qty, average_price = :avg_price
                     """)
-                    conn.execute(upsert_sql, {"u_id": u_id, "ticker": ticker, "qty": cur_qty, "avg_price": cur_avg})
+                    conn.execute(upsert_sql, {"u_id": u_id, "ticker": ticker, "qty": redis_qty, "avg_price": avg_price})
                 else:
                     delete_sql = text("DELETE FROM user_stocks WHERE user_id = :u_id AND ticker = :ticker")
                     conn.execute(delete_sql, {"u_id": u_id, "ticker": ticker})
 
-                processed_stock_count += 1
-
-        print(f"✅ [2단계 완료] 총 {processed_stock_count}건의 유저 주식 보유 상태 정산 완료.")
+    print(f"✅ [2단계 완료] 총 {len(all_stock_pairs)}건 검증 완료 (정상: {len(all_stock_pairs) - len(mismatched_pairs)}건, Redis 기준 보정: {len(mismatched_pairs)}건).")
 
     # =========================================================================
     # 3단계: DB 최신 검증 잔고 및 보유 주식 ➔ Redis 캐시 재워밍 (무조건 실행!)
