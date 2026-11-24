@@ -23,7 +23,7 @@ const CHART_COLORS = [
   "#00d084",
 ];
 
-// 백엔드 /api/portfolio 로 조회한 보유 주식을 표시하는 조회 전용 자산 리포트
+// 백엔드 /api/portfolio 로 조회한 보유 주식을 표시하는 자산 리포트
 interface StockReportProps {
   stockData: Stock[];
   holdings: Holding[];
@@ -32,6 +32,8 @@ interface StockReportProps {
   userId?: string | null;
   onDepositClick?: () => void;
   onWithdrawClick?: () => void;
+  onSelectTicker?: (ticker: string) => void;
+  onQuickSell?: (holding: Holding) => void;
 }
 
 const StockReport: React.FC<StockReportProps> = ({
@@ -41,6 +43,8 @@ const StockReport: React.FC<StockReportProps> = ({
   userId,
   onDepositClick,
   onWithdrawClick,
+  onSelectTicker,
+  onQuickSell,
 }) => {
   // 거래 내역 모달 열림 상태 (히스토리 아이콘 클릭 시)
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -236,6 +240,12 @@ const StockReport: React.FC<StockReportProps> = ({
                   {reportData.totalEvaluation.toLocaleString()}원
                 </Typography>
               </div>
+              <div className="flex justify-between">
+                <Typography className="summary-label">총 자산 (예수금 + 평가금)</Typography>
+                <Typography className="summary-value">
+                  {((balance ?? 0) + reportData.totalEvaluation).toLocaleString()}원
+                </Typography>
+              </div>
               <Divider className="my-2" />
               <div className="flex justify-between">
                 <Typography
@@ -278,15 +288,30 @@ const StockReport: React.FC<StockReportProps> = ({
                 key={item.ticker}
                 elevation={0}
                 className="holding-card flex items-center"
+                onClick={onSelectTicker ? () => onSelectTicker(item.ticker) : undefined}
+                sx={
+                  onSelectTicker
+                    ? { cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }
+                    : undefined
+                }
                 style={{
                   borderColor: item.color,
                 }}
               >
                 {/* 종목명 - 왼쪽 */}
                 <Box sx={{ width: "25%" }}>
-                  <Typography className="font-bold text-[#191f28]">
-                    {item.name}
-                  </Typography>
+                  {onSelectTicker ? (
+                    <Button
+                      color="inherit"
+                      sx={{ p: 0, minWidth: 0, fontWeight: 700, textTransform: "none" }}
+                    >
+                      {item.name}
+                    </Button>
+                  ) : (
+                    <Typography className="font-bold text-[#191f28]">
+                      {item.name}
+                    </Typography>
+                  )}
                 </Box>
 
                 {/* 총 보유수 - 가운데에서 살짝 왼쪽 */}
@@ -321,6 +346,20 @@ const StockReport: React.FC<StockReportProps> = ({
                     {item.profitRate.toFixed(2)}%)
                   </Typography>
                 </Box>
+                {onQuickSell && (
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    size="small"
+                    sx={{ minWidth: 0, flexShrink: 0 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onQuickSell(item);
+                    }}
+                  >
+                    매도
+                  </Button>
+                )}
               </Paper>
             ))}
           </Box>
