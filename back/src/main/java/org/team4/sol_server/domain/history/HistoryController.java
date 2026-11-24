@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.team4.sol_server.domain.history.dto.TradeHistoryItemDTO;
+import org.team4.sol_server.domain.history.dto.TradeHistoryStatsDTO;
 
 import java.util.List;
 
@@ -27,7 +28,15 @@ public class HistoryController {
     @GetMapping
     public ResponseEntity<List<TradeHistoryItemDTO>> getHistories(
             @RequestParam @NotBlank(message = "userId는 필수입니다.") String userId,
-            @RequestParam(defaultValue = "30") int limit) {
-        return ResponseEntity.ok(historyService.getHistories(userId, limit));
+            @RequestParam(defaultValue = "30") int limit,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String ticker) {
+        return ResponseEntity.ok(historyService.getHistories(userId, limit, type, ticker));
+    }
+
+    @GetMapping("/stats")
+    public ResponseEntity<TradeHistoryStatsDTO> getHistoryStats(
+            @RequestParam @NotBlank(message = "userId는 필수입니다.") String userId) {
+        return ResponseEntity.ok(historyService.getHistoryStats(userId));
     }
 }
